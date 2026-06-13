@@ -36,3 +36,4 @@ limine/limine.h
 
 # Compilation database
 compile_commands.json
+limine/
