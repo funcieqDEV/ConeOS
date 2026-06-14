@@ -8,9 +8,11 @@ OBJS = build/kernel/kernel.o \
        build/drivers/serial.o \
        build/drivers/framebuffer.o \
 	   build/drivers/pic.o \
+	   build/drivers/ps2.o \
 	   build/cpu/idt.o \
 	   build/cpu/irq.o \
-       build/gfx/draw.o
+       build/gfx/draw.o \
+	   build/gfx/console.o
 
 .PHONY: all clean run iso fmt
 
@@ -50,7 +52,7 @@ iso: iso_root/boot/kernel.elf limine/limine limine.conf
 	./limine/limine bios-install ConeOS.iso
 
 run: iso
-	qemu-system-x86_64 -M q35 -m 2G -cdrom ConeOS.iso -boot d
+	qemu-system-x86_64 -M q35 -m 2G -cdrom ConeOS.iso -boot d -serial stdio
 
 fmt:
 	find src -name '*.c' -o -name '*.h' | xargs clang-format -i

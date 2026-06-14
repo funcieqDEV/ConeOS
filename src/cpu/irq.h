@@ -1,5 +1,7 @@
 #pragma once
 #include <stdint.h>
+#include "../drivers/serial.h"
+#include "../drivers/pic.h"
 
 struct interrupt_frame {
     uint64_t ip;
@@ -16,3 +18,4 @@ void irq_install_handler(int irq, irq_handler_t handler);
 void irq_uninstall_handler(int irq);
 void irq_set_mask(uint8_t irq);
 void irq_clear_mask(uint8_t irq);
+

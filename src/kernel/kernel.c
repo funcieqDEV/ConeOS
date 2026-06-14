@@ -5,19 +5,31 @@
 #include "../drivers/pic.h"
 #include "../drivers/serial.h"
 #include "../gfx/draw.h"
+#include "../drivers/ps2.h"
+#include "../utils.h"
+#include "../gfx/console.h"
 #include <stdint.h>
 
-#define NULL ((void *)0)
+
 
 LIMINE_BASE_REVISION(6);
 
+static void irq0_handler(struct interrupt_frame *f) {
+  (void)f;
+  //print_serial("tick\n");
+}
+
 void kmain(void) {
+  serial_init();
   print_serial("start kernel\n");
   pic_remap();
   load_idt();
   irq_init();
-
+  irq_install_handler(0, irq0_handler);
+  irq_clear_mask(0);
+  irq_install_handler(1, keyboard_handler);
   struct limine_framebuffer *fb = framebuffer_get();
+  console_init(fb);
   if (fb == NULL) {
     print_serial("no framebuffer\n");
     for (;;)
@@ -35,8 +47,8 @@ void kmain(void) {
 
   print_serial("\n");
 
-  draw_string(fb, 10, 10, "ConeOS", 0x00FFFFFF, 2);
-  draw_string(fb, 10, 42, "Hello", 0x00FF0000, 2);
+  console_write("ConeOS v0.1.0\n");
+  irq_clear_mask(1);
   asm volatile("sti");
   for (;;)
     __asm__ volatile("hlt");

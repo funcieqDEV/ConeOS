@@ -20,6 +20,6 @@ void pic_remap(void) {
 }
 
 void pic_init_masks(void) {
-  outb(0x21, 0xFC); // turn on irq
+  outb(0x21, 0xFE); // turn on irq
   outb(0xA1, 0xFF);
 }
