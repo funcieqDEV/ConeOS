@@ -1,6 +1,7 @@
 #include "irq.h"
 #include "idt.h"
 #include "../drivers/pic.h"
+#include "../log.h"
 
 #define PIC1_DATA 0x21
 #define PIC2_DATA 0xA1
@@ -73,4 +74,5 @@ void irq_init(void) {
 
     outb(PIC1_DATA, 0xFF);
     outb(PIC2_DATA, 0xFF);
+    LOG_INFO("IRQ initialized");
 }

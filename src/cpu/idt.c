@@ -1,4 +1,5 @@
 #include "idt.h"
+#include "../log.h"
 
 static struct idt_entry idt[256];
 static struct idt_ptr idtp;
@@ -19,4 +20,5 @@ void load_idt(void) {
   idtp.limit = sizeof(idt) - 1;
 
   __asm__ volatile("lidt %0" : : "m"(idtp));
+  LOG_INFO("IDT loaded");
 }

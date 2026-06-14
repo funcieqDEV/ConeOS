@@ -8,6 +8,7 @@
 #include "../drivers/ps2.h"
 #include "../utils.h"
 #include "../gfx/console.h"
+#include "../log.h"
 #include <stdint.h>
 
 
@@ -21,33 +22,26 @@ static void irq0_handler(struct interrupt_frame *f) {
 
 void kmain(void) {
   serial_init();
-  print_serial("start kernel\n");
-  pic_remap();
-  load_idt();
-  irq_init();
-  irq_install_handler(0, irq0_handler);
-  irq_clear_mask(0);
-  irq_install_handler(1, keyboard_handler);
+
   struct limine_framebuffer *fb = framebuffer_get();
-  console_init(fb);
   if (fb == NULL) {
     print_serial("no framebuffer\n");
     for (;;)
       __asm__ volatile("hlt");
   }
+  console_init(fb);
+  log_console_enable();
 
-  print_serial("w=");
-  print_uint(fb->width);
-
-  print_serial(" h=");
-  print_uint(fb->height);
-
-  print_serial(" pitch=");
-  print_uint(fb->pitch);
-
-  print_serial("\n");
-
-  console_write("ConeOS v0.1.0\n");
+  LOG_INFO("kernel start");
+  pic_remap();
+  load_idt();
+  irq_init();
+  LOG_DEBUG("IDT + IRQ initialized");
+  irq_install_handler(0, irq0_handler);
+  irq_clear_mask(0);
+  irq_install_handler(1, keyboard_handler);
+  LOG_INFO("PS/2 keyboard initialized");
+  LOG_INFO("framebuffer OK");
   irq_clear_mask(1);
   asm volatile("sti");
   for (;;)
