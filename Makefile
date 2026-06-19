@@ -1,19 +1,22 @@
 CC = gcc
 LD = ld
 
-CFLAGS = -Wall -Wextra -O2 -pipe -m64 -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel
+CFLAGS = -Wall -Wextra -O2 -pipe -m64 -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -Iflanterm/src
 LDFLAGS = -m elf_x86_64 -nostdlib -static -T linker.ld -z max-page-size=0x1000
 
 OBJS = build/kernel/kernel.o \
+       build/lib/memory.o \
        build/log.o \
        build/drivers/serial.o \
        build/drivers/framebuffer.o \
 	   build/drivers/pic.o \
 	   build/drivers/ps2.o \
-	   build/cpu/idt.o \
+       build/cpu/idt.o \
 	   build/cpu/irq.o \
        build/gfx/draw.o \
-	   build/gfx/console.o
+	   build/gfx/console.o \
+       build/flanterm/flanterm.o \
+       build/flanterm/flanterm_backends/fb.o
 
 .PHONY: all clean run iso fmt
 
@@ -24,6 +27,10 @@ build/cpu/irq.o: src/cpu/irq.c
 	$(CC) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
 
 build/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build/flanterm/%.o: flanterm/src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 

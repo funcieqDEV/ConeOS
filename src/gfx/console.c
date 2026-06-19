@@ -1,51 +1,85 @@
 #include "console.h"
 #include "../utils.h"
-#include "../gfx/draw.h"
+#include <flanterm.h>
+#include <flanterm_backends/fb.h>
+#include <stddef.h>
+#include <stdint.h>
 
-static struct limine_framebuffer *g_fb = NULL;
-static int cursor_x = 0;
-static int cursor_y = 0;
-static unsigned int text_color = 0x00FFFFFF;
-#define FONT_W 8
-#define FONT_H 16
-#define FONT_SCALE 2 
+static struct flanterm_context *g_term = NULL;
 unsigned int columns = 0;
 unsigned int rows = 0;
 
+void console_init(struct limine_framebuffer *fb) {
+  uint32_t default_bg = 0x000000;
+  uint32_t default_fg = 0xffffff;
 
-void console_init(struct limine_framebuffer *fb){
-    g_fb = fb;
-    cursor_x = 0;
-    cursor_y = 0;
+  g_term = flanterm_fb_init(NULL, NULL, fb->address, fb->width, fb->height,
+                            fb->pitch, fb->red_mask_size, fb->red_mask_shift,
+                            fb->green_mask_size, fb->green_mask_shift,
+                            fb->blue_mask_size, fb->blue_mask_shift, NULL, NULL,
+                            NULL, &default_bg, &default_fg, NULL, NULL, NULL, 0,
+                            0, 0, 1, 1, 0, FLANTERM_FB_ROTATE_0);
 
-    columns =  fb->width / (FONT_W * FONT_SCALE);
-    rows = fb->height / (FONT_H * FONT_SCALE);
+  if (g_term) {
+    size_t term_columns;
+    size_t term_rows;
+
+    flanterm_clear(g_term, true);
+    flanterm_get_dimensions(g_term, &term_columns, &term_rows);
+    columns = (unsigned int)term_columns;
+    rows = (unsigned int)term_rows;
+  }
 }
 
-void console_set_color(unsigned int color){
-    text_color = color;
+void console_set_color(unsigned int color) {
+  if (!g_term)
+    return;
+
+  if (color == 0xFF4444) {
+    flanterm_set_text_fg(g_term, 1, true);
+  } else if (color == 0xFFFF00) {
+    flanterm_set_text_fg(g_term, 3, true);
+  } else if (color == 0x888888) {
+    flanterm_set_text_fg(g_term, 7, false);
+  } else {
+    flanterm_set_text_fg(g_term, 7, true);
+  }
 }
 
 void console_putchar(char c) {
-    if(!g_fb)
-        return;
+  if (!g_term)
+    return;
 
-    if(c == '\n'){
-        cursor_x = 0;
-        cursor_y++;
-        return;
-    }
+  if (c == '\r') {
+    flanterm_write(g_term, "\r\n", 2);
+    return;
+  }
 
-    draw_char(g_fb, cursor_x * FONT_W * FONT_SCALE, cursor_y * FONT_H * FONT_SCALE, c, text_color, FONT_SCALE);
-    cursor_x++;
+  if (c == '\n') {
+    flanterm_write(g_term, "\r\n", 2);
+    return;
+  }
 
-    if(cursor_x >= columns){
-        cursor_x = 0;
-        cursor_y++;
-    }
+  flanterm_write(g_term, &c, 1);
 }
 
 void console_write(const char *str) {
-    while(*str)
-        console_putchar(*str++);
+  if (!g_term)
+    return;
+
+  while (*str) {
+    if (*str == '\n') {
+      flanterm_write(g_term, "\r\n", 2);
+    } else {
+      flanterm_write(g_term, str, 1);
+    }
+    str++;
+  }
+}
+
+void console_clear(void) {
+  if (!g_term)
+    return;
+
+  flanterm_clear(g_term, true);
 }

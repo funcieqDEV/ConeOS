@@ -1,7 +1,5 @@
 #pragma once
 #include <stdint.h>
-#include "../drivers/serial.h"
-#include "../drivers/pic.h"
 
 struct interrupt_frame {
     uint64_t ip;

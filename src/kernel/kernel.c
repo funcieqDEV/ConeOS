@@ -3,21 +3,19 @@
 #include "../cpu/irq.h"
 #include "../drivers/framebuffer.h"
 #include "../drivers/pic.h"
-#include "../drivers/serial.h"
-#include "../gfx/draw.h"
 #include "../drivers/ps2.h"
-#include "../utils.h"
+#include "../drivers/serial.h"
 #include "../gfx/console.h"
+#include "../gfx/draw.h"
 #include "../log.h"
+#include "../utils.h"
 #include <stdint.h>
-
-
 
 LIMINE_BASE_REVISION(6);
 
 static void irq0_handler(struct interrupt_frame *f) {
   (void)f;
-  //print_serial("tick\n");
+  // print_serial("tick\n");
 }
 
 void kmain(void) {
@@ -37,6 +35,7 @@ void kmain(void) {
   load_idt();
   irq_init();
   LOG_DEBUG("IDT + IRQ initialized");
+  ps2_init();
   irq_install_handler(0, irq0_handler);
   irq_clear_mask(0);
   irq_install_handler(1, keyboard_handler);

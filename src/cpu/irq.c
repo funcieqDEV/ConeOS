@@ -9,7 +9,6 @@
 #define PIC2_CMD  0xA0
 #define PIC_EOI   0x20
 
-/* Limine protocol GDT: entry 5 = 64-bit code segment */
 #define KERNEL_CS    0x28
 #define IDT_INT_GATE 0x8E
 
@@ -47,7 +46,6 @@ static void irq_dispatch(int irq, struct interrupt_frame *frame) {
     pic_eoi(irq);
 }
 
-/* One stub per IRQ — GCC __attribute__((interrupt)) handles pushes/pops and iretq */
 #define IRQ_STUB(n)                                              \
     __attribute__((interrupt))                                   \
     static void irq##n##_stub(struct interrupt_frame *frame) {  \
