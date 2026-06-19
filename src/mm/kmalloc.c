@@ -3,8 +3,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// 4 MB
+#define RAM_SHORTAGE 1
+#ifdef RAM_SHORTAGE
 #define HEAP_SIZE 4194304
+#else
+// more ram
+#define HEAP_SIZE 16777216
+#endif
 static uint8_t heap_memory[HEAP_SIZE];
 
 // label for each memory block
