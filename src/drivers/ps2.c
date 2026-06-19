@@ -5,56 +5,56 @@
 #include <stddef.h>
 
 static int ps2_wait_write(void) {
-  for (size_t i = 0; i < 100000; i++) {
-    if (!(inb(0x64) & 0x02))
-      return 1;
-  }
+    for (size_t i = 0; i < 100000; i++) {
+        if (!(inb(0x64) & 0x02))
+            return 1;
+    }
 
-  return 0;
+    return 0;
 }
 
 static int ps2_wait_read(void) {
-  for (size_t i = 0; i < 100000; i++) {
-    if (inb(0x64) & 0x01)
-      return 1;
-  }
+    for (size_t i = 0; i < 100000; i++) {
+        if (inb(0x64) & 0x01)
+            return 1;
+    }
 
-  return 0;
+    return 0;
 }
 
 static void ps2_flush_output(void) {
-  while (inb(0x64) & 0x01)
-    (void)inb(0x60);
+    while (inb(0x64) & 0x01)
+        (void)inb(0x60);
 }
 
 static void ps2_write_command(uint8_t cmd) {
-  if (!ps2_wait_write())
-    return;
-  outb(0x64, cmd);
+    if (!ps2_wait_write())
+        return;
+    outb(0x64, cmd);
 }
 
 static void ps2_write_data(uint8_t data) {
-  if (!ps2_wait_write())
-    return;
-  outb(0x60, data);
+    if (!ps2_wait_write())
+        return;
+    outb(0x60, data);
 }
 
 void ps2_init(void) {
-  ps2_flush_output();
+    ps2_flush_output();
 
-  ps2_write_command(0xAD);
-  ps2_write_command(0x20);
-  uint8_t status = 0;
-  if (ps2_wait_read())
-    status = inb(0x60);
-  status |= 0x01;
-  ps2_write_command(0x60);
-  ps2_write_data(status);
-  ps2_write_command(0xAE);
+    ps2_write_command(0xAD);
+    ps2_write_command(0x20);
+    uint8_t status = 0;
+    if (ps2_wait_read())
+        status = inb(0x60);
+    status |= 0x01;
+    ps2_write_command(0x60);
+    ps2_write_data(status);
+    ps2_write_command(0xAE);
 
-  ps2_write_data(0xF4);
-  if (ps2_wait_read())
-    (void)inb(0x60);
+    ps2_write_data(0xF4);
+    if (ps2_wait_read())
+        (void)inb(0x60);
 }
 
 static const char keymap[128] = {
@@ -78,20 +78,20 @@ static const char keymap[128] = {
 };
 
 void keyboard_handler(struct interrupt_frame *f) {
-  (void)f;
+    (void)f;
 
-  uint8_t sc = inb(0x60);
+    uint8_t sc = inb(0x60);
 
-  if (sc & 0x80)
-    return;
+    if (sc & 0x80)
+        return;
 
-  char c = keymap[sc];
+    char c = keymap[sc];
 
-  if (c == '\b') {
-    print_serial("\b \b");
-    console_write("\b \b");
-  } else if (c) {
-    print_serial_char(c);
-    console_putchar(c);
-  }
+    if (c == '\b') {
+        print_serial("\b \b");
+        console_write("\b \b");
+    } else if (c) {
+        print_serial_char(c);
+        console_putchar(c);
+    }
 }

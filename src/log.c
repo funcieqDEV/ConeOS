@@ -5,9 +5,7 @@
 static log_level_t current_level = LOG_DEBUG;
 static int console_ready = 0;
 
-void log_console_enable(void) {
-    console_ready = 1;
-}
+void log_console_enable(void) { console_ready = 1; }
 
 static const char *level_str[] = {
     "[DEBUG] ",
@@ -24,9 +22,7 @@ static const unsigned int level_color[] = {
     0xFF4444,
 };
 
-void log_set_level(log_level_t min_level) {
-    current_level = min_level;
-}
+void log_set_level(log_level_t min_level) { current_level = min_level; }
 
 void log_msg(log_level_t level, const char *msg) {
     if (level < current_level)

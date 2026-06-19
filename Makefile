@@ -5,6 +5,7 @@ CFLAGS = -Wall -Wextra -O2 -pipe -m64 -ffreestanding -fno-stack-protector -fno-s
 LDFLAGS = -m elf_x86_64 -nostdlib -static -T linker.ld -z max-page-size=0x1000
 
 OBJS = build/kernel/kernel.o \
+       build/mm/kmalloc.o \
        build/lib/memory.o \
        build/log.o \
        build/drivers/serial.o \
