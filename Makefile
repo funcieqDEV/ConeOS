@@ -5,15 +5,25 @@ CFLAGS = -Wall -Wextra -O2 -pipe -m64 -ffreestanding -fno-stack-protector -fno-s
 LDFLAGS = -m elf_x86_64 -nostdlib -static -T linker.ld -z max-page-size=0x1000
 
 OBJS = build/kernel/kernel.o \
+       build/kernel/process.o \
+       build/kernel/shell.o \
+       build/kernel/task.o \
        build/mm/kmalloc.o \
+       build/mm/pmm.o \
+       build/mm/stack.o \
+       build/mm/vmm.o \
        build/lib/memory.o \
        build/log.o \
        build/drivers/serial.o \
        build/drivers/framebuffer.o \
 	   build/drivers/pic.o \
-	   build/drivers/ps2.o \
+       build/drivers/pit.o \
+       build/drivers/ps2.o \
+       build/cpu/gdt.o \
        build/cpu/idt.o \
+	   build/cpu/exceptions.o \
 	   build/cpu/irq.o \
+       build/cpu/syscall.o \
        build/gfx/draw.o \
 	   build/gfx/console.o \
        build/flanterm/flanterm.o \
@@ -23,7 +33,7 @@ OBJS = build/kernel/kernel.o \
 
 all: iso
 
-build/cpu/irq.o: src/cpu/irq.c
+build/cpu/irq.o build/cpu/exceptions.o: build/cpu/%.o: src/cpu/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
 
@@ -61,7 +71,7 @@ iso: iso_root/boot/kernel.elf limine/limine limine.conf
 	./limine/limine bios-install ConeOS.iso
 
 run: iso
-	qemu-system-x86_64 -M q35 -m 2G -cdrom ConeOS.iso -boot d -serial stdio
+	qemu-system-x86_64 -M q35 -m 256M -cdrom ConeOS.iso -boot d -serial stdio
 
 fmt:
 	find src -name '*.c' -o -name '*.h' | xargs clang-format -i

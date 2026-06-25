@@ -1,8 +1,12 @@
 #include "ps2.h"
-#include "../gfx/console.h"
 #include "pic.h"
-#include "serial.h"
 #include <stddef.h>
+
+#define KEYBOARD_BUFFER_SIZE 64
+
+static char keyboard_buffer[KEYBOARD_BUFFER_SIZE];
+static volatile uint8_t keyboard_head;
+static volatile uint8_t keyboard_tail;
 
 static int ps2_wait_write(void) {
     for (size_t i = 0; i < 100000; i++) {
@@ -86,12 +90,22 @@ void keyboard_handler(struct interrupt_frame *f) {
         return;
 
     char c = keymap[sc];
+    if (!c)
+        return;
 
-    if (c == '\b') {
-        print_serial("\b \b");
-        console_write("\b \b");
-    } else if (c) {
-        print_serial_char(c);
-        console_putchar(c);
-    }
+    uint8_t next = (keyboard_head + 1) % KEYBOARD_BUFFER_SIZE;
+    if (next == keyboard_tail)
+        return;
+
+    keyboard_buffer[keyboard_head] = c;
+    keyboard_head = next;
+}
+
+int keyboard_read_char(char *c) {
+    if (keyboard_tail == keyboard_head)
+        return 0;
+
+    *c = keyboard_buffer[keyboard_tail];
+    keyboard_tail = (keyboard_tail + 1) % KEYBOARD_BUFFER_SIZE;
+    return 1;
 }

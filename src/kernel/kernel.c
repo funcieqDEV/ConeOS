@@ -1,23 +1,26 @@
 #include "../../limine/limine.h"
+#include "../cpu/exceptions.h"
+#include "../cpu/gdt.h"
 #include "../cpu/idt.h"
 #include "../cpu/irq.h"
+#include "../cpu/syscall.h"
 #include "../drivers/framebuffer.h"
 #include "../drivers/pic.h"
+#include "../drivers/pit.h"
 #include "../drivers/ps2.h"
 #include "../drivers/serial.h"
 #include "../gfx/console.h"
 #include "../gfx/draw.h"
 #include "../log.h"
 #include "../mm/kmalloc.h"
+#include "../mm/pmm.h"
+#include "../mm/vmm.h"
 #include "../utils.h"
+#include "shell.h"
+#include "task.h"
 #include <stdint.h>
 
 LIMINE_BASE_REVISION(6);
-
-static void irq0_handler(struct interrupt_frame *f) {
-    (void)f;
-    // print_serial("tick\n");
-}
 
 void kmain(void) {
     serial_init();
@@ -32,20 +35,45 @@ void kmain(void) {
     log_console_enable();
 
     LOG_INFO("kernel start");
-    kmalloc_init();
+    if (!pmm_init()) {
+        LOG_ERROR("failed to initialize physical memory manager");
+        for (;;)
+            __asm__ volatile("hlt");
+    }
+    if (!vmm_init()) {
+        LOG_ERROR("failed to initialize virtual memory manager");
+        for (;;)
+            __asm__ volatile("hlt");
+    }
+    if (!kmalloc_init()) {
+        LOG_ERROR("failed to initialize kernel heap");
+        for (;;)
+            __asm__ volatile("hlt");
+    }
+    if (!gdt_init()) {
+        LOG_ERROR("failed to initialize GDT and TSS");
+        for (;;)
+            __asm__ volatile("hlt");
+    }
+    task_init();
 
     pic_remap();
-    load_idt();
+    exceptions_init();
     irq_init();
-    LOG_DEBUG("IDT + IRQ initialized");
+    syscall_init();
+    load_idt();
+    LOG_DEBUG("IDT, exceptions and IRQ initialized");
     ps2_init();
-    irq_install_handler(0, irq0_handler);
-    irq_clear_mask(0);
+    pit_init();
     irq_install_handler(1, keyboard_handler);
     LOG_INFO("PS/2 keyboard initialized");
     LOG_INFO("framebuffer OK");
     irq_clear_mask(1);
+    task_enable_preemption();
     asm volatile("sti");
-    for (;;)
+    shell_init();
+    for (;;) {
+        shell_poll();
         __asm__ volatile("hlt");
+    }
 }

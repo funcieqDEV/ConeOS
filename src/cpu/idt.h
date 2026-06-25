@@ -17,5 +17,5 @@ struct idt_ptr {
 } __attribute__((packed));
 
 void idt_set_gate(uint8_t vector, uint64_t handler, uint16_t selector,
-                  uint8_t type_attr);
+                  uint8_t type_attr, uint8_t ist);
 void load_idt(void);

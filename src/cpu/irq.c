@@ -1,6 +1,7 @@
 #include "irq.h"
 #include "../drivers/pic.h"
 #include "../log.h"
+#include "gdt.h"
 #include "idt.h"
 
 #define PIC1_DATA 0x21
@@ -9,7 +10,6 @@
 #define PIC2_CMD 0xA0
 #define PIC_EOI 0x20
 
-#define KERNEL_CS 0x28
 #define IDT_INT_GATE 0x8E
 
 static irq_handler_t irq_handlers[16];
@@ -41,9 +41,9 @@ void irq_install_handler(int irq, irq_handler_t handler) {
 void irq_uninstall_handler(int irq) { irq_handlers[irq] = 0; }
 
 static void irq_dispatch(int irq, struct interrupt_frame *frame) {
+    pic_eoi(irq);
     if (irq_handlers[irq])
         irq_handlers[irq](frame);
-    pic_eoi(irq);
 }
 
 #define IRQ_STUB(n)                                                            \
@@ -53,9 +53,11 @@ static void irq_dispatch(int irq, struct interrupt_frame *frame) {
     }
 
 IRQ_STUB(0)
-IRQ_STUB(1) IRQ_STUB(2) IRQ_STUB(3) IRQ_STUB(4) IRQ_STUB(5) IRQ_STUB(6)
-    IRQ_STUB(7) IRQ_STUB(8) IRQ_STUB(9) IRQ_STUB(10) IRQ_STUB(11) IRQ_STUB(12)
-        IRQ_STUB(13) IRQ_STUB(14) IRQ_STUB(15)
+IRQ_STUB(1)
+IRQ_STUB(2)
+IRQ_STUB(3) IRQ_STUB(4) IRQ_STUB(5) IRQ_STUB(6) IRQ_STUB(7) IRQ_STUB(8)
+    IRQ_STUB(9) IRQ_STUB(10) IRQ_STUB(11) IRQ_STUB(12) IRQ_STUB(13) IRQ_STUB(14)
+        IRQ_STUB(15)
 
             static void *const irq_stubs[16] = {
                 irq0_stub,  irq1_stub,  irq2_stub,  irq3_stub,
@@ -66,7 +68,8 @@ IRQ_STUB(1) IRQ_STUB(2) IRQ_STUB(3) IRQ_STUB(4) IRQ_STUB(5) IRQ_STUB(6)
 
 void irq_init(void) {
     for (int i = 0; i < 16; i++) {
-        idt_set_gate(0x20 + i, (uint64_t)irq_stubs[i], KERNEL_CS, IDT_INT_GATE);
+        idt_set_gate(0x20 + i, (uint64_t)irq_stubs[i], GDT_KERNEL_CODE,
+                     IDT_INT_GATE, 0);
         irq_handlers[i] = 0;
     }
 
