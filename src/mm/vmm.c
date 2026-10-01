@@ -1,9 +1,9 @@
 #include "vmm.h"
+#include "../../limine/limine.h"
+#include "../cpu/protection.h"
 #include "../log.h"
 #include "kmalloc.h"
 #include "pmm.h"
-#include "../cpu/protection.h"
-#include "../../limine/limine.h"
 #include <stddef.h>
 
 #define PAGE_ADDRESS_MASK 0x000FFFFFFFFFF000ULL
@@ -13,9 +13,10 @@
 
 static struct vmm_space kernel_space;
 
-__attribute__((used, section(".limine_requests")))
-static volatile struct limine_kernel_address_request kernel_address_request = {
-    .id = LIMINE_KERNEL_ADDRESS_REQUEST, .revision = 0,
+__attribute__((used, section(".limine_requests"))) static volatile struct
+    limine_kernel_address_request kernel_address_request = {
+        .id = LIMINE_KERNEL_ADDRESS_REQUEST,
+        .revision = 0,
 };
 
 extern char __kernel_text_start[], __kernel_text_end[];
@@ -111,7 +112,7 @@ static int create_table(uint64_t *entry, uint64_t flags) {
 }
 
 static uint64_t page_table_virtual_address(uint64_t prefix, size_t index,
-                                          int level) {
+                                           int level) {
     unsigned int shift = 12 + 9 * (unsigned int)(level - 1);
     return prefix | ((uint64_t)index << shift);
 }
@@ -134,8 +135,8 @@ static int clone_user_mappings_cow(struct vmm_space *child,
                     return 0;
                 continue;
             }
-            if (!clone_user_mappings_cow(child, table_physical(entry), level - 1,
-                                         address))
+            if (!clone_user_mappings_cow(child, table_physical(entry),
+                                         level - 1, address))
                 return 0;
             continue;
         }
@@ -207,7 +208,7 @@ struct vmm_space *vmm_space_clone_cow(struct vmm_space *space) {
 }
 
 static int range_overlaps(uint64_t start, uint64_t size,
-                           uint64_t protected_start, uint64_t protected_end) {
+                          uint64_t protected_start, uint64_t protected_end) {
     return start < protected_end &&
            (start >= protected_start || protected_start - start < size);
 }
@@ -230,7 +231,8 @@ static int split_boot_mapping(uint64_t *entry, int level) {
     uint64_t large_pat = *entry & (1ULL << 12);
     if (level == 2) {
         attributes &= ~PAGE_SIZE_FLAG;
-        if (large_pat) attributes |= 1ULL << 7;
+        if (large_pat)
+            attributes |= 1ULL << 7;
     } else {
         attributes |= large_pat;
     }
@@ -249,29 +251,36 @@ static int protect_boot_table(uint64_t physical_table, int level,
     uint64_t text_end = (uint64_t)__kernel_text_end;
     for (size_t i = 0; i < ENTRY_COUNT; i++) {
         uint64_t *entry = &table[i];
-        if (!(*entry & VMM_PRESENT)) continue;
+        if (!(*entry & VMM_PRESENT))
+            continue;
         uint64_t address = page_table_virtual_address(prefix, i, level);
         if (level == 4 && (address & (1ULL << 47)))
             address |= 0xFFFF000000000000ULL;
 
         if (level == 1 || (*entry & PAGE_SIZE_FLAG)) {
-            if (level == 4) return 0;
+            if (level == 4)
+                return 0;
             uint64_t size = 1ULL << (12 + 9 * (level - 1));
             uint64_t physical = (*entry & PAGE_ADDRESS_MASK) & ~(size - 1);
-            int readonly = range_contains(readonly_start, readonly_end,
-                                           physical, size);
-            int executable = range_contains(text_start, text_end, address, size);
+            int readonly =
+                range_contains(readonly_start, readonly_end, physical, size);
+            int executable =
+                range_contains(text_start, text_end, address, size);
             if (level > 1 &&
                 ((!readonly && range_overlaps(physical, size, readonly_start,
-                                                readonly_end)) ||
-                 (!executable && range_overlaps(address, size, text_start,
-                                                  text_end)))) {
-                if (!split_boot_mapping(entry, level)) return 0;
+                                              readonly_end)) ||
+                 (!executable &&
+                  range_overlaps(address, size, text_start, text_end)))) {
+                if (!split_boot_mapping(entry, level))
+                    return 0;
             } else {
                 *entry &= ~VMM_USER;
-                if (readonly || executable) *entry &= ~VMM_WRITABLE;
-                if (executable) *entry &= ~VMM_NO_EXECUTE;
-                else *entry |= VMM_NO_EXECUTE;
+                if (readonly || executable)
+                    *entry &= ~VMM_WRITABLE;
+                if (executable)
+                    *entry &= ~VMM_NO_EXECUTE;
+                else
+                    *entry |= VMM_NO_EXECUTE;
                 continue;
             }
         }
@@ -279,7 +288,7 @@ static int protect_boot_table(uint64_t physical_table, int level,
         /* Permissions belong to leaves, including future user mappings. */
         *entry = (*entry | VMM_WRITABLE) & ~(VMM_USER | VMM_NO_EXECUTE);
         if (!protect_boot_table(table_physical(*entry), level - 1, address,
-                                 readonly_start, readonly_end))
+                                readonly_start, readonly_end))
             return 0;
     }
     return 1;
@@ -303,12 +312,12 @@ int vmm_init(void) {
     }
     uint64_t physical_base = kernel_address_request.response->physical_base;
     uint64_t virtual_base = kernel_address_request.response->virtual_base;
-    uint64_t readonly_start = physical_base +
-                              (uint64_t)__kernel_text_start - virtual_base;
-    uint64_t readonly_end = physical_base +
-                            (uint64_t)__kernel_rodata_end - virtual_base;
-    if (!protect_boot_table(kernel_space.pml4_physical, 4, 0,
-                             readonly_start, readonly_end)) {
+    uint64_t readonly_start =
+        physical_base + (uint64_t)__kernel_text_start - virtual_base;
+    uint64_t readonly_end =
+        physical_base + (uint64_t)__kernel_rodata_end - virtual_base;
+    if (!protect_boot_table(kernel_space.pml4_physical, 4, 0, readonly_start,
+                            readonly_end)) {
         LOG_ERROR("failed to protect kernel mappings");
         return 0;
     }
@@ -316,7 +325,9 @@ int vmm_init(void) {
     if (cr4 & (1ULL << 7)) {
         uint64_t without_pge = cr4 & ~(1ULL << 7);
         __asm__ volatile("mov %0, %%cr4; mov %1, %%cr4"
-                         : : "r"(without_pge), "r"(cr4) : "memory");
+                         :
+                         : "r"(without_pge), "r"(cr4)
+                         : "memory");
     } else {
         vmm_space_activate(&kernel_space);
     }
@@ -413,9 +424,8 @@ int vmm_space_map_page(struct vmm_space *space, uint64_t virtual_address,
         physical_address % PMM_PAGE_SIZE != 0 ||
         physical_address == PMM_INVALID_ADDRESS ||
         ((flags & VMM_WRITABLE) && !(flags & VMM_NO_EXECUTE)) ||
-        ((flags & VMM_USER) &&
-         (virtual_address >= 0x0000800000000000ULL ||
-          space == &kernel_space)) ||
+        ((flags & VMM_USER) && (virtual_address >= 0x0000800000000000ULL ||
+                                space == &kernel_space)) ||
         (virtual_address >= 0xFFFF800000000000ULL && space != &kernel_space))
         return 0;
 
@@ -450,10 +460,10 @@ int vmm_space_map_page(struct vmm_space *space, uint64_t virtual_address,
     if (*page_entry & VMM_PRESENT)
         goto rollback;
 
-    *page_entry = physical_address | VMM_PRESENT |
-                  (flags & (VMM_WRITABLE | VMM_USER | VMM_WRITE_THROUGH |
-                            VMM_CACHE_DISABLE | VMM_NO_EXECUTE |
-                            VMM_COPY_ON_WRITE));
+    *page_entry =
+        physical_address | VMM_PRESENT |
+        (flags & (VMM_WRITABLE | VMM_USER | VMM_WRITE_THROUGH |
+                  VMM_CACHE_DISABLE | VMM_NO_EXECUTE | VMM_COPY_ON_WRITE));
     if (flags & VMM_USER) {
         table = space_root(space);
         for (size_t level = 0; level < 3; level++) {
@@ -570,7 +580,8 @@ int vmm_space_query(const struct vmm_space *space, uint64_t virtual_address,
     uint64_t no_execute = 0;
     for (size_t level = 0; level < 4; level++) {
         uint64_t entry = table[indices[level]];
-        if (!(entry & VMM_PRESENT) || (level == 0 && (entry & PAGE_SIZE_FLAG))) {
+        if (!(entry & VMM_PRESENT) ||
+            (level == 0 && (entry & PAGE_SIZE_FLAG))) {
             interrupt_restore(lock_flags);
             return 0;
         }

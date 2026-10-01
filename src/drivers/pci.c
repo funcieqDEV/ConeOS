@@ -24,13 +24,16 @@ uint32_t pci_config_read32(uint8_t bus, uint8_t slot, uint8_t function,
     return inl(PCI_CONFIG_DATA);
 }
 
-void pci_config_write16(uint8_t bus, uint8_t slot, uint8_t function, uint8_t offset,
-                        uint16_t value) {
+void pci_config_write16(uint8_t bus, uint8_t slot, uint8_t function,
+                        uint8_t offset, uint16_t value) {
     uint32_t address = 0x80000000U | ((uint32_t)bus << 16) |
                        ((uint32_t)slot << 11) | ((uint32_t)function << 8) |
                        (offset & 0xFC);
     outl(PCI_CONFIG_ADDRESS, address);
-    __asm__ volatile("outw %0, %1" : : "a"(value), "Nd"((uint16_t)(PCI_CONFIG_DATA + (offset & 2))));
+    __asm__ volatile("outw %0, %1"
+                     :
+                     : "a"(value),
+                       "Nd"((uint16_t)(PCI_CONFIG_DATA + (offset & 2))));
 }
 
 void pci_init(void) {
@@ -41,7 +44,8 @@ void pci_init(void) {
                 uint32_t identity = pci_config_read32(bus, slot, function, 0);
                 uint16_t vendor = identity & 0xFFFF;
                 if (vendor == 0xFFFF) {
-                    if (function == 0) break;
+                    if (function == 0)
+                        break;
                     continue;
                 }
                 uint32_t class_data = pci_config_read32(bus, slot, function, 8);
@@ -56,8 +60,10 @@ void pci_init(void) {
                         .function = function,
                     };
                 }
-                uint8_t header = pci_config_read32(bus, slot, function, 12) >> 16;
-                if (function == 0 && !(header & 0x80)) break;
+                uint8_t header =
+                    pci_config_read32(bus, slot, function, 12) >> 16;
+                if (function == 0 && !(header & 0x80))
+                    break;
             }
         }
     }
@@ -66,6 +72,8 @@ void pci_init(void) {
 
 size_t pci_device_count(void) { return device_count; }
 int pci_get_device(size_t index, struct pci_device_info *info) {
-    if (index >= device_count || info == NULL) return 0;
-    *info = devices[index]; return 1;
+    if (index >= device_count || info == NULL)
+        return 0;
+    *info = devices[index];
+    return 1;
 }

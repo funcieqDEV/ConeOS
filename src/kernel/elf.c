@@ -55,15 +55,15 @@ static void copy_bytes(uint8_t *destination, const uint8_t *source,
         destination[i] = source[i];
 }
 
-static enum elf_load_result load_segment(
-    const uint8_t *image, size_t image_size,
-    const struct elf64_program_header *program, struct vmm_space *space) {
+static enum elf_load_result
+load_segment(const uint8_t *image, size_t image_size,
+             const struct elf64_program_header *program,
+             struct vmm_space *space) {
     if (program->file_size > program->memory_size ||
         !range_valid(program->offset, program->file_size, image_size) ||
         !range_valid(program->virtual_address, program->memory_size,
                      USER_ADDRESS_LIMIT) ||
-        (program->flags & ELF_FLAG_WRITE &&
-         program->flags & ELF_FLAG_EXECUTE))
+        (program->flags & ELF_FLAG_WRITE && program->flags & ELF_FLAG_EXECUTE))
         return ELF_LOAD_INVALID;
     if (program->memory_size == 0)
         return ELF_LOAD_SUCCESS;
@@ -119,8 +119,7 @@ enum elf_load_result elf_load(const uint8_t *image, size_t image_size,
     const struct elf64_header *header = (const void *)image;
     if (header->ident[0] != 0x7F || header->ident[1] != 'E' ||
         header->ident[2] != 'L' || header->ident[3] != 'F' ||
-        header->ident[4] != ELF_CLASS_64 ||
-        header->ident[5] != ELF_DATA_LSB ||
+        header->ident[4] != ELF_CLASS_64 || header->ident[5] != ELF_DATA_LSB ||
         header->ident[6] != ELF_CURRENT_VERSION ||
         header->type != ELF_TYPE_EXECUTABLE ||
         header->machine != ELF_MACHINE_X86_64 ||
@@ -161,7 +160,8 @@ enum elf_load_result elf_load(const uint8_t *image, size_t image_size,
         if (result != ELF_LOAD_SUCCESS)
             return result;
         total_pages += segment_pages;
-        if (segment_end > highest_end) highest_end = segment_end;
+        if (segment_end > highest_end)
+            highest_end = segment_end;
         if ((program->flags & ELF_FLAG_EXECUTE) &&
             header->entry >= program->virtual_address &&
             header->entry - program->virtual_address < program->memory_size)

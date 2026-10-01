@@ -316,9 +316,7 @@ uint64_t task_current_id(void) {
     return current_task != NULL ? current_task->id : UINT64_MAX;
 }
 
-void task_block_current(void) {
-    (void)task_block_current_if(NULL, NULL);
-}
+void task_block_current(void) { (void)task_block_current_if(NULL, NULL); }
 
 int task_block_current_if(int (*should_block)(void *), void *argument) {
     uint64_t flags = interrupt_lock();

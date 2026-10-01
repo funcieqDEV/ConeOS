@@ -20,31 +20,38 @@ static int keyboard_input_waiting(void *argument) {
     return !keyboard_char_available();
 }
 
-static int path_is_root(const char *path) {
-    return path && path[0] == '\0';
-}
+static int path_is_root(const char *path) { return path && path[0] == '\0'; }
 
 int devfs_device_for_path(const char *path) {
-    if (!path) return DEVFS_DEVICE_NONE;
+    if (!path)
+        return DEVFS_DEVICE_NONE;
     for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]); i++) {
         size_t j = 0;
-        while (devices[i].name[j] && path[j] == devices[i].name[j]) j++;
-        if (!devices[i].name[j] && !path[j]) return devices[i].device;
+        while (devices[i].name[j] && path[j] == devices[i].name[j])
+            j++;
+        if (!devices[i].name[j] && !path[j])
+            return devices[i].device;
     }
     return DEVFS_DEVICE_NONE;
 }
 
 int devfs_read(enum devfs_device device, char *buffer, size_t length,
                size_t *read) {
-    if (read) *read = 0;
-    if (!buffer && length) return 0;
-    if (device == DEVFS_DEVICE_NULL) return 1;
+    if (read)
+        *read = 0;
+    if (!buffer && length)
+        return 0;
+    if (device == DEVFS_DEVICE_NULL)
+        return 1;
     if (device == DEVFS_DEVICE_ZERO) {
-        for (size_t i = 0; i < length; i++) buffer[i] = 0;
-        if (read) *read = length;
+        for (size_t i = 0; i < length; i++)
+            buffer[i] = 0;
+        if (read)
+            *read = length;
         return 1;
     }
-    if (device != DEVFS_DEVICE_CONSOLE) return 0;
+    if (device != DEVFS_DEVICE_CONSOLE)
+        return 0;
 
     size_t count = 0;
     while (count == 0) {
@@ -53,16 +60,20 @@ int devfs_read(enum devfs_device device, char *buffer, size_t length,
             buffer[count++] = value;
         if (count == 0 && length)
             task_block_current_if(keyboard_input_waiting, NULL);
-        if (length == 0) break;
+        if (length == 0)
+            break;
     }
-    if (read) *read = count;
+    if (read)
+        *read = count;
     return 1;
 }
 
 int devfs_write(enum devfs_device device, const char *buffer, size_t length,
                 size_t *written) {
-    if (written) *written = 0;
-    if (!buffer && length) return 0;
+    if (written)
+        *written = 0;
+    if (!buffer && length)
+        return 0;
     if (device == DEVFS_DEVICE_CONSOLE) {
         for (size_t i = 0; i < length; i++) {
             print_serial_char(buffer[i]);
@@ -71,18 +82,21 @@ int devfs_write(enum devfs_device device, const char *buffer, size_t length,
     } else if (device != DEVFS_DEVICE_NULL && device != DEVFS_DEVICE_ZERO) {
         return 0;
     }
-    if (written) *written = length;
+    if (written)
+        *written = length;
     return 1;
 }
 
 int devfs_stat(const char *path, size_t *size) {
-    if (!size || devfs_device_for_path(path) == DEVFS_DEVICE_NONE) return 0;
+    if (!size || devfs_device_for_path(path) == DEVFS_DEVICE_NONE)
+        return 0;
     *size = 0;
     return 1;
 }
 
 int devfs_readdir(const char *path, size_t index, struct fs_dirent *entry) {
-    if (!path_is_root(path) || !entry || index >= sizeof(devices) / sizeof(devices[0]))
+    if (!path_is_root(path) || !entry ||
+        index >= sizeof(devices) / sizeof(devices[0]))
         return 0;
     const char *name = devices[index].name;
     size_t i = 0;
@@ -97,5 +111,8 @@ int devfs_readdir(const char *path, size_t index, struct fs_dirent *entry) {
 }
 
 int devfs_is_directory(const char *path) { return path_is_root(path); }
-int devfs_reject(const char *path) { (void)path; return 0; }
+int devfs_reject(const char *path) {
+    (void)path;
+    return 0;
+}
 int devfs_sync(void) { return 1; }

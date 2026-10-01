@@ -1,13 +1,13 @@
 #include "process.h"
-#include "elf.h"
+#include "../cpu/syscall.h"
+#include "../cpu/syscall_numbers.h"
+#include "../fs/ramfs.h"
+#include "../fs/vfs.h"
 #include "../mm/kmalloc.h"
 #include "../mm/pmm.h"
 #include "../mm/vmm.h"
-#include "../cpu/syscall.h"
-#include "../cpu/syscall_numbers.h"
+#include "elf.h"
 #include "task.h"
-#include "../fs/ramfs.h"
-#include "../fs/vfs.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -53,7 +53,11 @@ static uint64_t align_up_page(uint64_t address) {
 }
 
 static void copy_path(char *destination, const char *source) {
-    size_t i = 0; while (source[i] && i < FS_PATH_MAX - 1) { destination[i] = source[i]; i++; }
+    size_t i = 0;
+    while (source[i] && i < FS_PATH_MAX - 1) {
+        destination[i] = source[i];
+        i++;
+    }
     destination[i] = '\0';
 }
 
@@ -135,9 +139,9 @@ static void forked_process_task(void *argument) {
     syscall_resume_user(&frame);
 }
 
-static enum process_image_result create_process_image(
-    const char *path, const char *const arguments[], size_t argc,
-    struct process_image *image) {
+static enum process_image_result
+create_process_image(const char *path, const char *const arguments[],
+                     size_t argc, struct process_image *image) {
     if (path == NULL || image == NULL || argc > PROCESS_MAX_ARGUMENTS ||
         (argc != 0 && arguments == NULL))
         return PROCESS_IMAGE_INVALID;
@@ -153,10 +157,9 @@ static enum process_image_result create_process_image(
     if (!ramfs_read(path, (char *)executable_image, sizeof(executable_image),
                     &image_size))
         goto failure;
-    enum elf_load_result load_result =
-        elf_load(executable_image, image_size, space,
-                 PROCESS_MEMORY_LIMIT_PAGES - 1, &entry, &image_end,
-                 &elf_pages);
+    enum elf_load_result load_result = elf_load(
+        executable_image, image_size, space, PROCESS_MEMORY_LIMIT_PAGES - 1,
+        &entry, &image_end, &elf_pages);
     if (load_result != ELF_LOAD_SUCCESS) {
         if (load_result == ELF_LOAD_OUT_OF_MEMORY)
             failure = PROCESS_IMAGE_OUT_OF_MEMORY;
@@ -218,8 +221,7 @@ failure:
     return failure;
 }
 
-static int64_t process_spawn_path_args(const char *path,
-                                      const char *argument) {
+static int64_t process_spawn_path_args(const char *path, const char *argument) {
     struct process_record *record = free_process_record();
     if (record == NULL)
         return SYSCALL_ENOMEM;
@@ -230,10 +232,13 @@ static int64_t process_spawn_path_args(const char *path,
     size_t position = 0;
     while (argument != NULL && argument[position] &&
            argc < PROCESS_MAX_ARGUMENTS) {
-        while (argument[position] == ' ') position++;
-        if (!argument[position]) break;
+        while (argument[position] == ' ')
+            position++;
+        if (!argument[position])
+            break;
         size_t start = position;
-        while (argument[position] && argument[position] != ' ') position++;
+        while (argument[position] && argument[position] != ' ')
+            position++;
         size_t length = position - start;
         if (length >= sizeof(argument_storage[0]))
             return SYSCALL_EINVAL;
@@ -248,9 +253,8 @@ static int64_t process_spawn_path_args(const char *path,
     enum process_image_result image_result =
         create_process_image(path, arguments, argc, &image);
     if (image_result != PROCESS_IMAGE_READY)
-        return image_result == PROCESS_IMAGE_OUT_OF_MEMORY
-                   ? SYSCALL_ENOMEM
-                   : SYSCALL_EINVAL;
+        return image_result == PROCESS_IMAGE_OUT_OF_MEMORY ? SYSCALL_ENOMEM
+                                                           : SYSCALL_EINVAL;
 
     struct process_launch *launch = kmalloc(sizeof(*launch));
     if (launch == NULL) {
@@ -262,8 +266,8 @@ static int64_t process_spawn_path_args(const char *path,
     launch->argc = image.argc;
     launch->argv = image.argv;
 
-    uint64_t pid = task_create_in_space("user-hello", user_process_task,
-                                        launch, image.space);
+    uint64_t pid = task_create_in_space("user-hello", user_process_task, launch,
+                                        image.space);
     if (pid == UINT64_MAX) {
         kfree(launch);
         vmm_space_destroy(image.space);
@@ -289,58 +293,80 @@ static int64_t process_spawn_path_args(const char *path,
 int process_getcwd(char *buffer, size_t capacity) {
     struct process_record *process = find_process(task_current_id());
     const char *cwd = process != NULL ? process->cwd : "/";
-    size_t length = 0; while (cwd[length]) length++;
-    if (buffer == NULL || capacity <= length) return 0;
-    for (size_t i = 0; i <= length; i++) buffer[i] = cwd[i];
+    size_t length = 0;
+    while (cwd[length])
+        length++;
+    if (buffer == NULL || capacity <= length)
+        return 0;
+    for (size_t i = 0; i <= length; i++)
+        buffer[i] = cwd[i];
     return 1;
 }
 
 int process_chdir(const char *path) {
     struct process_record *process = find_process(task_current_id());
-    if (process == NULL || path == NULL) return 0;
-    char absolute[FS_PATH_MAX]; size_t out = 0, in = 0;
+    if (process == NULL || path == NULL)
+        return 0;
+    char absolute[FS_PATH_MAX];
+    size_t out = 0, in = 0;
     if (path[0] == '/') {
         absolute[out++] = '/';
-        while (path[in] == '/') in++;
+        while (path[in] == '/')
+            in++;
     } else {
         while (process->cwd[out] && out < sizeof(absolute) - 1)
             absolute[out] = process->cwd[out], out++;
     }
     while (path[in]) {
         size_t start = in;
-        while (path[in] && path[in] != '/') in++;
+        while (path[in] && path[in] != '/')
+            in++;
         size_t length = in - start;
-        while (path[in] == '/') in++;
-        if (length == 0 || (length == 1 && path[start] == '.')) continue;
+        while (path[in] == '/')
+            in++;
+        if (length == 0 || (length == 1 && path[start] == '.'))
+            continue;
         if (length == 2 && path[start] == '.' && path[start + 1] == '.') {
             if (out > 1) {
-                if (absolute[out - 1] == '/') out--;
-                while (out > 1 && absolute[out - 1] != '/') out--;
+                if (absolute[out - 1] == '/')
+                    out--;
+                while (out > 1 && absolute[out - 1] != '/')
+                    out--;
             }
             continue;
         }
         if (out > 1 && absolute[out - 1] != '/') {
-            if (out >= sizeof(absolute) - 1) return 0;
+            if (out >= sizeof(absolute) - 1)
+                return 0;
             absolute[out++] = '/';
         }
-        if (out + length >= sizeof(absolute)) return 0;
-        for (size_t i = 0; i < length; i++) absolute[out++] = path[start + i];
+        if (out + length >= sizeof(absolute))
+            return 0;
+        for (size_t i = 0; i < length; i++)
+            absolute[out++] = path[start + i];
     }
-    if (out == 0) absolute[out++] = '/';
+    if (out == 0)
+        absolute[out++] = '/';
     absolute[out] = '\0';
-    if (!vfs_is_directory(absolute)) return 0;
-    copy_path(process->cwd, absolute); return 1;
+    if (!vfs_is_directory(absolute))
+        return 0;
+    copy_path(process->cwd, absolute);
+    return 1;
 }
 
 int process_cwd_in_mount(const char *mount_path) {
     size_t length = 0;
-    while (mount_path[length]) length++;
+    while (mount_path[length])
+        length++;
     for (size_t i = 0; i < MAX_PROCESSES; i++) {
-        if (processes[i].state != PROCESS_RUNNING) continue;
+        if (processes[i].state != PROCESS_RUNNING)
+            continue;
         size_t j = 0;
-        while (j < length && processes[i].cwd[j] == mount_path[j]) j++;
-        if (j == length && (processes[i].cwd[j] == '\0' ||
-                            processes[i].cwd[j] == '/')) return 1;
+        while (j < length && processes[i].cwd[j] == mount_path[j])
+            j++;
+        if (j == length &&
+            (processes[i].cwd[j] == '\0' || processes[i].cwd[j] == '/'))
+            return 1;
     }
     return 0;
 }
@@ -348,9 +374,8 @@ int process_cwd_in_mount(const char *mount_path) {
 int64_t process_fork(struct syscall_frame *frame) {
     struct process_record *parent = find_process(task_current_id());
     struct process_record *child = free_process_record();
-    if (frame == NULL || parent == NULL ||
-        parent->state != PROCESS_RUNNING || parent->space == NULL ||
-        child == NULL)
+    if (frame == NULL || parent == NULL || parent->state != PROCESS_RUNNING ||
+        parent->space == NULL || child == NULL)
         return SYSCALL_ENOMEM;
 
     struct process_fork_launch *launch = kmalloc(sizeof(*launch));
@@ -365,8 +390,8 @@ int64_t process_fork(struct syscall_frame *frame) {
         return SYSCALL_ENOMEM;
     }
 
-    uint64_t pid = task_create_in_space("fork", forked_process_task,
-                                        launch, space);
+    uint64_t pid =
+        task_create_in_space("fork", forked_process_task, launch, space);
     if (pid == UINT64_MAX) {
         vmm_space_destroy(space);
         kfree(launch);
@@ -395,7 +420,8 @@ int64_t process_brk(uint64_t requested) {
     struct process_record *process = find_process(task_current_id());
     if (process == NULL || process->state != PROCESS_RUNNING || !process->space)
         return SYSCALL_EINVAL;
-    if (requested == 0) return (int64_t)process->program_break;
+    if (requested == 0)
+        return (int64_t)process->program_break;
     if (requested < process->heap_base ||
         requested > USER_STACK_ADDRESS - PMM_PAGE_SIZE)
         return SYSCALL_EINVAL;
@@ -418,19 +444,21 @@ int64_t process_brk(uint64_t requested) {
         for (uint64_t address = old_break; address < requested;) {
             uint64_t physical = vmm_space_translate(process->space, address);
             uint64_t amount = PMM_PAGE_SIZE - (address & (PMM_PAGE_SIZE - 1));
-            if (amount > requested - address) amount = requested - address;
+            if (amount > requested - address)
+                amount = requested - address;
             if (physical != PMM_INVALID_ADDRESS) {
                 uint8_t *memory = pmm_physical_to_virtual(physical);
-                for (uint64_t i = 0; i < amount; i++) memory[i] = 0;
+                for (uint64_t i = 0; i < amount; i++)
+                    memory[i] = 0;
             }
             address += amount;
         }
     } else {
         for (uint64_t address = new_page; address < old_page;
              address += PMM_PAGE_SIZE) {
-            uint64_t physical =
-                vmm_space_unmap_page(process->space, address);
-            if (physical != PMM_INVALID_ADDRESS) pmm_free_page(physical);
+            uint64_t physical = vmm_space_unmap_page(process->space, address);
+            if (physical != PMM_INVALID_ADDRESS)
+                pmm_free_page(physical);
         }
     }
 
@@ -480,11 +508,14 @@ int process_handle_page_fault(uint64_t address, uint64_t error_code) {
     if (physical == PMM_INVALID_ADDRESS)
         return -1;
     uint8_t *page = pmm_physical_to_virtual(physical);
-    for (size_t i = 0; i < PMM_PAGE_SIZE; i++) page[i] = 0;
+    for (size_t i = 0; i < PMM_PAGE_SIZE; i++)
+        page[i] = 0;
 
     uint64_t flags = VMM_USER;
-    if (protection & CONEOS_PROT_WRITE) flags |= VMM_WRITABLE;
-    if (!(protection & CONEOS_PROT_EXEC)) flags |= VMM_NO_EXECUTE;
+    if (protection & CONEOS_PROT_WRITE)
+        flags |= VMM_WRITABLE;
+    if (!(protection & CONEOS_PROT_EXEC))
+        flags |= VMM_NO_EXECUTE;
     if (!vmm_space_map_page(process->space, page_address, physical, flags)) {
         pmm_free_page(physical);
         return -1;
@@ -495,8 +526,7 @@ int process_handle_page_fault(uint64_t address, uint64_t error_code) {
 static int rounded_mapping_length(uint64_t length, uint64_t *rounded) {
     if (length == 0 || length > UINT64_MAX - (PMM_PAGE_SIZE - 1))
         return 0;
-    *rounded = (length + PMM_PAGE_SIZE - 1) &
-               ~(uint64_t)(PMM_PAGE_SIZE - 1);
+    *rounded = (length + PMM_PAGE_SIZE - 1) & ~(uint64_t)(PMM_PAGE_SIZE - 1);
     return 1;
 }
 
@@ -536,8 +566,7 @@ static int select_mapping_address(const struct process_record *process,
 
             uint64_t end = candidate + length;
             int occupied = 0;
-            for (uint64_t page = candidate; page < end;
-                 page += PMM_PAGE_SIZE) {
+            for (uint64_t page = candidate; page < end; page += PMM_PAGE_SIZE) {
                 if (vmm_space_translate(process->space, page) ==
                     PMM_INVALID_ADDRESS)
                     continue;
@@ -554,13 +583,12 @@ static int select_mapping_address(const struct process_record *process,
     return 0;
 }
 
-int64_t process_mmap(uint64_t hint, uint64_t length,
-                     uint64_t protection, uint64_t flags) {
+int64_t process_mmap(uint64_t hint, uint64_t length, uint64_t protection,
+                     uint64_t flags) {
     struct process_record *process = find_process(task_current_id());
-    const uint64_t valid_protection = CONEOS_PROT_READ | CONEOS_PROT_WRITE |
-                                      CONEOS_PROT_EXEC;
-    const uint64_t required_flags =
-        CONEOS_MAP_PRIVATE | CONEOS_MAP_ANONYMOUS;
+    const uint64_t valid_protection =
+        CONEOS_PROT_READ | CONEOS_PROT_WRITE | CONEOS_PROT_EXEC;
+    const uint64_t required_flags = CONEOS_MAP_PRIVATE | CONEOS_MAP_ANONYMOUS;
     uint64_t rounded_length;
 
     if (!process || process->state != PROCESS_RUNNING || !process->space ||
@@ -570,8 +598,8 @@ int64_t process_mmap(uint64_t hint, uint64_t length,
         (protection & (CONEOS_PROT_WRITE | CONEOS_PROT_EXEC)) ==
             (CONEOS_PROT_WRITE | CONEOS_PROT_EXEC) ||
         flags != required_flags ||
-        (hint && (hint % PMM_PAGE_SIZE != 0 ||
-                  hint < MMAP_ADDRESS_START || hint >= MMAP_ADDRESS_LIMIT)))
+        (hint && (hint % PMM_PAGE_SIZE != 0 || hint < MMAP_ADDRESS_START ||
+                  hint >= MMAP_ADDRESS_LIMIT)))
         return SYSCALL_EINVAL;
 
     size_t slot = find_free_mapping_slot(process);
@@ -675,8 +703,8 @@ int process_spawn_path(const char *path) {
 
 int process_run_hello(void) { return process_spawn_path("/bin/init"); }
 
-int64_t process_exec_path_args(const char *path,
-                               const char *const arguments[], size_t argc) {
+int64_t process_exec_path_args(const char *path, const char *const arguments[],
+                               size_t argc) {
     struct process_record *process = find_process(task_current_id());
     struct process_image image;
     if (process == NULL || process->state != PROCESS_RUNNING)
@@ -684,9 +712,8 @@ int64_t process_exec_path_args(const char *path,
     enum process_image_result image_result =
         create_process_image(path, arguments, argc, &image);
     if (image_result != PROCESS_IMAGE_READY)
-        return image_result == PROCESS_IMAGE_OUT_OF_MEMORY
-                   ? SYSCALL_ENOMEM
-                   : SYSCALL_EINVAL;
+        return image_result == PROCESS_IMAGE_OUT_OF_MEMORY ? SYSCALL_ENOMEM
+                                                           : SYSCALL_EINVAL;
 
     struct vmm_space *old_space = task_replace_address_space(image.space);
     if (old_space == NULL) {
@@ -703,7 +730,8 @@ int64_t process_exec_path_args(const char *path,
         process->mappings[i].used = 0;
 
     vmm_space_destroy(old_space);
-    process_enter_user(image.entry, image.stack_pointer, image.argc, image.argv);
+    process_enter_user(image.entry, image.stack_pointer, image.argc,
+                       image.argv);
 }
 
 int64_t process_exec_path(const char *path) {

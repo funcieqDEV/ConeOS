@@ -191,9 +191,9 @@ static void execute_command(void) {
             shell_write("write: invalid file or data\n");
         } else {
             *separator = '\0';
-            int written = ramfs_write(&line[6], separator + 1,
-                                       line_length -
-                                           (size_t)(separator + 1 - line));
+            int written =
+                ramfs_write(&line[6], separator + 1,
+                            line_length - (size_t)(separator + 1 - line));
             *separator = ' ';
             if (!written)
                 shell_write("write: invalid file or data\n");
@@ -230,7 +230,7 @@ static void execute_command(void) {
         uint64_t physical = pmm_alloc_page();
         int mapped = physical != PMM_INVALID_ADDRESS &&
                      vmm_map_page(VMM_TEST_ADDRESS, physical,
-                                   VMM_WRITABLE | VMM_NO_EXECUTE);
+                                  VMM_WRITABLE | VMM_NO_EXECUTE);
         int contents_valid = 0;
         if (mapped) {
             volatile uint64_t *test = (volatile uint64_t *)VMM_TEST_ADDRESS;

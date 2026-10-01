@@ -1,8 +1,8 @@
 #pragma once
 
+#include "dirent.h"
 #include <stddef.h>
 #include <stdint.h>
-#include "dirent.h"
 
 void vfs_init(void);
 int vfs_open(const char *name, int create);

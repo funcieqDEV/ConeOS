@@ -1,7 +1,7 @@
 #pragma once
 
-#include <stddef.h>
 #include "dirent.h"
+#include <stddef.h>
 
 #define RAMFS_MAX_FILES 64
 #define RAMFS_MAX_DIRECTORIES 16

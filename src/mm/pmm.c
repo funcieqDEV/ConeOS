@@ -102,8 +102,7 @@ int pmm_init(void) {
         uint64_t end = align_down(entry->base + entry->length, PMM_PAGE_SIZE);
         if (end - start >= metadata_page_count * PMM_PAGE_SIZE) {
             bitmap_physical = start;
-            references_physical =
-                start + bitmap_page_count * PMM_PAGE_SIZE;
+            references_physical = start + bitmap_page_count * PMM_PAGE_SIZE;
             bitmap_region_found = 1;
             break;
         }
@@ -184,7 +183,8 @@ uint64_t pmm_alloc_user_page(void) {
 }
 
 uint64_t pmm_alloc_contiguous(uint64_t count) {
-    if (count == 0) return PMM_INVALID_ADDRESS;
+    if (count == 0)
+        return PMM_INVALID_ADDRESS;
     uint64_t flags = interrupt_lock();
     if (count > free_pages) {
         interrupt_restore(flags);

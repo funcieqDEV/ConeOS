@@ -97,59 +97,89 @@ int ramfs_write(const char *name, const char *data, size_t size) {
 
 int ramfs_stat(const char *name, size_t *size) {
     struct ramfs_file *file = find_file(name);
-    if (file == NULL || size == NULL) return 0;
+    if (file == NULL || size == NULL)
+        return 0;
     *size = file->size;
     return 1;
 }
 
 int ramfs_is_directory(const char *path) {
-    if (path == NULL) return 0;
+    if (path == NULL)
+        return 0;
     for (size_t i = 0; i < directory_count; i++)
-        if (name_equal(directories[i], path)) return 1;
+        if (name_equal(directories[i], path))
+            return 1;
     return 0;
 }
 
 int ramfs_mkdir(const char *path) {
     if (path == NULL || !path[0] || directory_count >= RAMFS_MAX_DIRECTORIES)
         return 0;
-    if (ramfs_is_directory(path)) return 0;
-    size_t length = 0; while (path[length] && length < RAMFS_NAME_SIZE) length++;
-    if (length >= RAMFS_NAME_SIZE) return 0;
-    for (size_t i = 0; i <= length; i++) directories[directory_count][i] = path[i];
+    if (ramfs_is_directory(path))
+        return 0;
+    size_t length = 0;
+    while (path[length] && length < RAMFS_NAME_SIZE)
+        length++;
+    if (length >= RAMFS_NAME_SIZE)
+        return 0;
+    for (size_t i = 0; i <= length; i++)
+        directories[directory_count][i] = path[i];
     directory_count++;
     return 1;
 }
 
 int ramfs_unlink(const char *path) {
     struct ramfs_file *file = find_file(path);
-    if (file == NULL) return 0;
-    if (file->data != NULL) kfree(file->data);
-    file->used = 0; file->data = NULL; file->size = 0;
+    if (file == NULL)
+        return 0;
+    if (file->data != NULL)
+        kfree(file->data);
+    file->used = 0;
+    file->data = NULL;
+    file->size = 0;
     return 1;
 }
 
 int ramfs_rmdir(const char *path) {
-    if (path == NULL || name_equal(path, "/") || name_equal(path, "/bin")) return 0;
+    if (path == NULL || name_equal(path, "/") || name_equal(path, "/bin"))
+        return 0;
     size_t index = 0;
-    while (index < directory_count && !name_equal(directories[index], path)) index++;
-    if (index == directory_count) return 0;
-    char prefix[RAMFS_NAME_SIZE]; size_t length = 0;
-    while (path[length] && length < RAMFS_NAME_SIZE - 1) { prefix[length] = path[length]; length++; }
-    if (length == 0 || length >= RAMFS_NAME_SIZE - 1) return 0;
-    if (prefix[length - 1] != '/') prefix[length++] = '/';
+    while (index < directory_count && !name_equal(directories[index], path))
+        index++;
+    if (index == directory_count)
+        return 0;
+    char prefix[RAMFS_NAME_SIZE];
+    size_t length = 0;
+    while (path[length] && length < RAMFS_NAME_SIZE - 1) {
+        prefix[length] = path[length];
+        length++;
+    }
+    if (length == 0 || length >= RAMFS_NAME_SIZE - 1)
+        return 0;
+    if (prefix[length - 1] != '/')
+        prefix[length++] = '/';
     prefix[length] = '\0';
     for (size_t i = 0; i < RAMFS_MAX_FILES; i++) {
-        if (!files[i].used) continue;
-        size_t j = 0; while (prefix[j] && files[i].name[j] == prefix[j]) j++;
-        if (prefix[j] == '\0') return 0;
+        if (!files[i].used)
+            continue;
+        size_t j = 0;
+        while (prefix[j] && files[i].name[j] == prefix[j])
+            j++;
+        if (prefix[j] == '\0')
+            return 0;
     }
     for (size_t i = 0; i < directory_count; i++) {
-        if (i == index) continue;
-        size_t j = 0; while (prefix[j] && directories[i][j] == prefix[j]) j++;
-        if (prefix[j] == '\0') return 0;
+        if (i == index)
+            continue;
+        size_t j = 0;
+        while (prefix[j] && directories[i][j] == prefix[j])
+            j++;
+        if (prefix[j] == '\0')
+            return 0;
     }
     for (size_t i = index + 1; i < directory_count; i++)
-        for (size_t j = 0; j < RAMFS_NAME_SIZE; j++) directories[i - 1][j] = directories[i][j];
+        for (size_t j = 0; j < RAMFS_NAME_SIZE; j++)
+            directories[i - 1][j] = directories[i][j];
     directory_count--;
     return 1;
 }
@@ -157,25 +187,31 @@ int ramfs_rmdir(const char *path) {
 size_t ramfs_list_directories(char output[][RAMFS_NAME_SIZE], size_t capacity) {
     size_t count = directory_count < capacity ? directory_count : capacity;
     for (size_t i = 0; i < count; i++)
-        for (size_t j = 0; j < RAMFS_NAME_SIZE; j++) output[i][j] = directories[i][j];
+        for (size_t j = 0; j < RAMFS_NAME_SIZE; j++)
+            output[i][j] = directories[i][j];
     return directory_count;
 }
 
 static const char *ramfs_direct_child(const char *directory, const char *path) {
     size_t directory_length = 0;
-    while (directory[directory_length]) directory_length++;
+    while (directory[directory_length])
+        directory_length++;
     size_t start;
     if (directory_length == 1 && directory[0] == '/') {
-        if (path[0] != '/' || path[1] == '\0') return NULL;
+        if (path[0] != '/' || path[1] == '\0')
+            return NULL;
         start = 1;
     } else {
         size_t i = 0;
-        while (i < directory_length && path[i] == directory[i]) i++;
-        if (i != directory_length || path[i] != '/' || path[i + 1] == '\0') return NULL;
+        while (i < directory_length && path[i] == directory[i])
+            i++;
+        if (i != directory_length || path[i] != '/' || path[i + 1] == '\0')
+            return NULL;
         start = i + 1;
     }
     for (size_t i = start; path[i]; i++)
-        if (path[i] == '/') return NULL;
+        if (path[i] == '/')
+            return NULL;
     return &path[start];
 }
 
@@ -189,22 +225,28 @@ static void copy_entry_name(struct fs_dirent *entry, const char *name) {
 }
 
 int ramfs_readdir(const char *path, size_t index, struct fs_dirent *entry) {
-    if (!ramfs_is_directory(path) || !entry) return -1;
+    if (!ramfs_is_directory(path) || !entry)
+        return -1;
     size_t visible = 0;
     for (size_t i = 0; i < directory_count; i++) {
         const char *name = ramfs_direct_child(path, directories[i]);
-        if (!name) continue;
-        if (visible++ != index) continue;
+        if (!name)
+            continue;
+        if (visible++ != index)
+            continue;
         copy_entry_name(entry, name);
         entry->size = 0;
         entry->type = FS_DIRENT_DIRECTORY;
         return 1;
     }
     for (size_t i = 0; i < RAMFS_MAX_FILES; i++) {
-        if (!files[i].used) continue;
+        if (!files[i].used)
+            continue;
         const char *name = ramfs_direct_child(path, files[i].name);
-        if (!name) continue;
-        if (visible++ != index) continue;
+        if (!name)
+            continue;
+        if (visible++ != index)
+            continue;
         copy_entry_name(entry, name);
         entry->size = files[i].size;
         entry->type = FS_DIRENT_FILE;

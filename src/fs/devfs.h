@@ -1,7 +1,7 @@
 #pragma once
 
-#include <stddef.h>
 #include "dirent.h"
+#include <stddef.h>
 
 enum devfs_device {
     DEVFS_DEVICE_NONE,

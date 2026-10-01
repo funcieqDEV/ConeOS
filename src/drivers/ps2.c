@@ -1,6 +1,6 @@
 #include "ps2.h"
-#include "pic.h"
 #include "../kernel/task.h"
+#include "pic.h"
 #include <stddef.h>
 
 #define KEYBOARD_BUFFER_SIZE 64
@@ -98,11 +98,26 @@ void keyboard_handler(struct interrupt_frame *f) {
 
     uint8_t sc = inb(0x60);
 
-    if (sc == 0x2A) { shift_left = 1; return; }
-    if (sc == 0x36) { shift_right = 1; return; }
-    if (sc == 0xAA) { shift_left = 0; return; }
-    if (sc == 0xB6) { shift_right = 0; return; }
-    if (sc == 0x3A) { caps_lock = !caps_lock; return; }
+    if (sc == 0x2A) {
+        shift_left = 1;
+        return;
+    }
+    if (sc == 0x36) {
+        shift_right = 1;
+        return;
+    }
+    if (sc == 0xAA) {
+        shift_left = 0;
+        return;
+    }
+    if (sc == 0xB6) {
+        shift_right = 0;
+        return;
+    }
+    if (sc == 0x3A) {
+        caps_lock = !caps_lock;
+        return;
+    }
     if (sc & 0x80)
         return;
 
@@ -111,7 +126,8 @@ void keyboard_handler(struct interrupt_frame *f) {
         return;
     int shifted = shift_left || shift_right;
     if (c >= 'a' && c <= 'z') {
-        if (shifted != caps_lock) c -= 'a' - 'A';
+        if (shifted != caps_lock)
+            c -= 'a' - 'A';
     } else if (shifted && shifted_keymap[sc]) {
         c = shifted_keymap[sc];
     }
