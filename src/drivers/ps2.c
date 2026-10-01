@@ -1,5 +1,6 @@
 #include "ps2.h"
 #include "pic.h"
+#include "../kernel/task.h"
 #include <stddef.h>
 
 #define KEYBOARD_BUFFER_SIZE 64
@@ -7,6 +8,9 @@
 static char keyboard_buffer[KEYBOARD_BUFFER_SIZE];
 static volatile uint8_t keyboard_head;
 static volatile uint8_t keyboard_tail;
+static int shift_left;
+static int shift_right;
+static int caps_lock;
 
 static int ps2_wait_write(void) {
     for (size_t i = 0; i < 100000; i++) {
@@ -81,17 +85,36 @@ static const char keymap[128] = {
     [0x39] = ' ',
 };
 
+static const char shifted_keymap[128] = {
+    [0x02] = '!', [0x03] = '@', [0x04] = '#', [0x05] = '$', [0x06] = '%',
+    [0x07] = '^', [0x08] = '&', [0x09] = '*', [0x0A] = '(', [0x0B] = ')',
+    [0x0C] = '_', [0x0D] = '+', [0x1A] = '{', [0x1B] = '}', [0x27] = ':',
+    [0x28] = '"', [0x29] = '~', [0x2B] = '|', [0x33] = '<', [0x34] = '>',
+    [0x35] = '?',
+};
+
 void keyboard_handler(struct interrupt_frame *f) {
     (void)f;
 
     uint8_t sc = inb(0x60);
 
+    if (sc == 0x2A) { shift_left = 1; return; }
+    if (sc == 0x36) { shift_right = 1; return; }
+    if (sc == 0xAA) { shift_left = 0; return; }
+    if (sc == 0xB6) { shift_right = 0; return; }
+    if (sc == 0x3A) { caps_lock = !caps_lock; return; }
     if (sc & 0x80)
         return;
 
     char c = keymap[sc];
     if (!c)
         return;
+    int shifted = shift_left || shift_right;
+    if (c >= 'a' && c <= 'z') {
+        if (shifted != caps_lock) c -= 'a' - 'A';
+    } else if (shifted && shifted_keymap[sc]) {
+        c = shifted_keymap[sc];
+    }
 
     uint8_t next = (keyboard_head + 1) % KEYBOARD_BUFFER_SIZE;
     if (next == keyboard_tail)
@@ -99,6 +122,7 @@ void keyboard_handler(struct interrupt_frame *f) {
 
     keyboard_buffer[keyboard_head] = c;
     keyboard_head = next;
+    task_wake_blocked();
 }
 
 int keyboard_read_char(char *c) {
@@ -109,3 +133,5 @@ int keyboard_read_char(char *c) {
     keyboard_tail = (keyboard_tail + 1) % KEYBOARD_BUFFER_SIZE;
     return 1;
 }
+
+int keyboard_char_available(void) { return keyboard_tail != keyboard_head; }

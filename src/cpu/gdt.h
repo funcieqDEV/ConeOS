@@ -13,3 +13,4 @@
 
 int gdt_init(void);
 void gdt_set_kernel_stack(uint64_t stack_top);
+void gdt_set_page_fault_stack(uint64_t stack_top);

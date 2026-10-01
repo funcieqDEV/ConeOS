@@ -5,9 +5,10 @@
 #include "../cpu/irq.h"
 #include "../cpu/syscall.h"
 #include "../drivers/framebuffer.h"
-#include "../drivers/pic.h"
 #include "../drivers/pit.h"
 #include "../drivers/ps2.h"
+#include "../drivers/pci.h"
+#include "../drivers/block.h"
 #include "../drivers/serial.h"
 #include "../gfx/console.h"
 #include "../gfx/draw.h"
@@ -15,8 +16,14 @@
 #include "../mm/kmalloc.h"
 #include "../mm/pmm.h"
 #include "../mm/vmm.h"
+#include "../fs/ramfs.h"
+#include "../fs/vfs.h"
+#include "../fs/initramfs.h"
+#include "../fs/fat32.h"
+#include "../firmware/acpi.h"
 #include "../utils.h"
 #include "shell.h"
+#include "process.h"
 #include "task.h"
 #include <stdint.h>
 
@@ -50,6 +57,10 @@ void kmain(void) {
         for (;;)
             __asm__ volatile("hlt");
     }
+    ramfs_init();
+    if (!initramfs_mount())
+        LOG_ERROR("failed to mount initramfs");
+    vfs_init();
     if (!gdt_init()) {
         LOG_ERROR("failed to initialize GDT and TSS");
         for (;;)
@@ -57,23 +68,46 @@ void kmain(void) {
     }
     task_init();
 
-    pic_remap();
     exceptions_init();
     irq_init();
     syscall_init();
     load_idt();
+    acpi_init();
+    if (!irq_controller_init()) {
+        for (;;)
+            __asm__ volatile("hlt");
+    }
     LOG_DEBUG("IDT, exceptions and IRQ initialized");
     ps2_init();
     pit_init();
     irq_install_handler(1, keyboard_handler);
     LOG_INFO("PS/2 keyboard initialized");
     LOG_INFO("framebuffer OK");
+    pci_init();
+    if (block_init()) {
+        uint8_t boot_sector[512];
+        if (block_read_sector(0, boot_sector))
+            LOG_INFO("VirtIO block sector I/O verified");
+        else
+            LOG_ERROR("VirtIO block sector I/O failed");
+        if (fat32_mount() && !vfs_mount("fat32", "/disk"))
+            LOG_ERROR("failed to register FAT32 mount at /disk");
+    }
     irq_clear_mask(1);
     task_enable_preemption();
     asm volatile("sti");
-    shell_init();
+    int userspace_active = process_run_hello();
+    if (!userspace_active)
+        shell_init();
     for (;;) {
-        shell_poll();
+        if (userspace_active && !process_is_running()) {
+            shell_init();
+            userspace_active = 0;
+        }
+        if (userspace_active)
+            task_yield();
+        else
+            shell_poll();
         __asm__ volatile("hlt");
     }
 }

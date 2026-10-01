@@ -2,9 +2,11 @@
 #include "../drivers/serial.h"
 #include "../gfx/console.h"
 #include "../kernel/task.h"
+#include "../kernel/process.h"
 #include "gdt.h"
 #include "idt.h"
 #include "irq.h"
+#include "protection.h"
 #include <stdint.h>
 
 #define IDT_INT_GATE 0x8E
@@ -63,9 +65,37 @@ static void panic_write_hex(uint64_t value) {
     panic_write(buffer);
 }
 
-__attribute__((noreturn)) static void
-exception_panic(uint8_t vector, uint64_t error_code,
-                struct interrupt_frame *frame) {
+static void exception_panic(uint8_t vector, uint64_t error_code,
+                            struct interrupt_frame *frame) {
+    cpu_clear_access_override();
+    if (vector == 14 && (frame->cs & 3) == 3) {
+        uint64_t fault_address;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(fault_address));
+        int result = process_handle_page_fault(fault_address, error_code);
+        if (result > 0)
+            return;
+        if (result < 0) {
+            panic_write("User process terminated: out of memory\n");
+            process_exit_current(PROCESS_EXIT_OUT_OF_MEMORY);
+        }
+    }
+
+    if ((frame->cs & 3) == 3) {
+        panic_write("User process exception: ");
+        panic_write(exception_names[vector]);
+        panic_write(" (RIP ");
+        panic_write_hex(frame->ip);
+        panic_write(")\n");
+        if (vector == 14) {
+            uint64_t fault_address;
+            __asm__ volatile("mov %%cr2, %0" : "=r"(fault_address));
+            panic_write("Fault address: ");
+            panic_write_hex(fault_address);
+            panic_write("\n");
+        }
+        process_exit_current(128 + vector);
+    }
+
     __asm__ volatile("cli");
 
     console_set_color(0xFF4444);

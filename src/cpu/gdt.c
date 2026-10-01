@@ -91,3 +91,8 @@ int gdt_init(void) {
 }
 
 void gdt_set_kernel_stack(uint64_t stack_top) { tss.rsp[0] = stack_top; }
+
+void gdt_set_page_fault_stack(uint64_t stack_top) {
+    tss.ist[GDT_IST_PAGE_FAULT - 1] =
+        stack_top ? stack_top : page_fault_stack.top;
+}

@@ -1,5 +1,6 @@
 #include "task.h"
 #include "../cpu/gdt.h"
+#include "../drivers/pit.h"
 #include "../log.h"
 #include "../mm/kmalloc.h"
 #include "../mm/pmm.h"
@@ -7,6 +8,7 @@
 #include "../mm/vmm.h"
 
 #define TASK_STACK_SIZE (64 * 1024)
+#define TASK_FAULT_STACK_PAGES 4
 
 struct task {
     uint64_t *stack_pointer;
@@ -16,8 +18,10 @@ struct task {
     task_entry_t entry;
     void *argument;
     struct kernel_stack stack;
+    struct kernel_stack fault_stack;
     struct vmm_space *space;
     int owns_space;
+    uint64_t wake_at_ms;
     struct task *next;
 };
 
@@ -68,6 +72,7 @@ static void remove_zombies(void) {
         if (task != current_task && task->state == TASK_ZOMBIE) {
             previous->next = task->next;
             kernel_stack_free(&task->stack);
+            kernel_stack_free(&task->fault_stack);
             if (task->owns_space)
                 vmm_space_destroy(task->space);
             kfree(task);
@@ -80,6 +85,13 @@ static void remove_zombies(void) {
 }
 
 static struct task *next_ready_task(void) {
+    uint64_t now = pit_uptime_ms();
+    for (struct task *candidate = task_list; candidate != NULL;
+         candidate = candidate->next) {
+        if (candidate->state == TASK_SLEEPING && candidate->wake_at_ms <= now)
+            candidate->state = TASK_READY;
+    }
+
     struct task *task =
         current_task->next != NULL ? current_task->next : task_list;
 
@@ -117,6 +129,7 @@ void task_init(void) {
     main_task.stack.page_count = 0;
     main_task.space = vmm_kernel_space();
     main_task.owns_space = 0;
+    main_task.wake_at_ms = 0;
     main_task.next = NULL;
     task_list = &main_task;
     current_task = &main_task;
@@ -148,6 +161,13 @@ uint64_t task_create_in_space(const char *name, task_entry_t entry,
         return UINT64_MAX;
     }
 
+    struct kernel_stack fault_stack;
+    if (!kernel_stack_alloc(&fault_stack, TASK_FAULT_STACK_PAGES)) {
+        kernel_stack_free(&stack);
+        kfree(task);
+        return UINT64_MAX;
+    }
+
     uint64_t *stack_pointer = (uint64_t *)stack.top;
     *--stack_pointer = 0;
     *--stack_pointer = (uint64_t)task_bootstrap;
@@ -165,8 +185,10 @@ uint64_t task_create_in_space(const char *name, task_entry_t entry,
     task->entry = entry;
     task->argument = argument;
     task->stack = stack;
+    task->fault_stack = fault_stack;
     task->space = space;
     task->owns_space = space != vmm_kernel_space();
+    task->wake_at_ms = 0;
     task->next = NULL;
 
     struct task *last = task_list;
@@ -174,6 +196,42 @@ uint64_t task_create_in_space(const char *name, task_entry_t entry,
         last = last->next;
     last->next = task;
     return task->id;
+}
+
+int task_cancel_ready(uint64_t id) {
+    uint64_t flags = interrupt_lock();
+    for (struct task *task = task_list; task != NULL; task = task->next) {
+        if (task->id != id)
+            continue;
+        if (task == current_task || task->state != TASK_READY) {
+            interrupt_restore(flags);
+            return 0;
+        }
+        task->state = TASK_ZOMBIE;
+        interrupt_restore(flags);
+        return 1;
+    }
+    interrupt_restore(flags);
+    return 0;
+}
+
+struct vmm_space *task_replace_address_space(struct vmm_space *space) {
+    if (space == NULL || space == vmm_kernel_space())
+        return NULL;
+
+    uint64_t flags = interrupt_lock();
+    if (current_task == NULL || !current_task->owns_space ||
+        current_task->space == space) {
+        interrupt_restore(flags);
+        return NULL;
+    }
+
+    struct vmm_space *previous = current_task->space;
+    current_task->space = space;
+    current_task->owns_space = 1;
+    vmm_space_activate(space);
+    interrupt_restore(flags);
+    return previous;
 }
 
 static void schedule(int clean_zombies) {
@@ -199,6 +257,7 @@ static void schedule(int clean_zombies) {
     next->state = TASK_RUNNING;
     current_task = next;
     gdt_set_kernel_stack(next->stack.top);
+    gdt_set_page_fault_stack(next == &main_task ? 0 : next->fault_stack.top);
     vmm_space_activate(next->space);
     task_context_switch(&previous->stack_pointer, next->stack_pointer);
     interrupt_restore(flags);
@@ -251,4 +310,47 @@ uint64_t task_current_stack_guard(void) {
 int task_current_stack_guard_contains(uint64_t address) {
     return current_task != NULL &&
            kernel_stack_contains_guard(&current_task->stack, address);
+}
+
+uint64_t task_current_id(void) {
+    return current_task != NULL ? current_task->id : UINT64_MAX;
+}
+
+void task_block_current(void) {
+    (void)task_block_current_if(NULL, NULL);
+}
+
+int task_block_current_if(int (*should_block)(void *), void *argument) {
+    uint64_t flags = interrupt_lock();
+    if (should_block && !should_block(argument)) {
+        interrupt_restore(flags);
+        return 0;
+    }
+    current_task->state = TASK_BLOCKED;
+    task_yield();
+    interrupt_restore(flags);
+    return 1;
+}
+
+void task_wake_blocked(void) {
+    uint64_t flags = interrupt_lock();
+    for (struct task *task = task_list; task != NULL; task = task->next) {
+        if (task->state == TASK_BLOCKED)
+            task->state = TASK_READY;
+    }
+    interrupt_restore(flags);
+}
+
+void task_sleep_ms(uint64_t milliseconds) {
+    if (milliseconds == 0) {
+        task_yield();
+        return;
+    }
+    uint64_t flags = interrupt_lock();
+    uint64_t now = pit_uptime_ms();
+    current_task->wake_at_ms =
+        milliseconds > UINT64_MAX - now ? UINT64_MAX : now + milliseconds;
+    current_task->state = TASK_SLEEPING;
+    interrupt_restore(flags);
+    task_yield();
 }

@@ -67,7 +67,7 @@ static int grow_heap(size_t minimum_payload) {
         uint64_t physical = pmm_alloc_page();
         uint64_t virtual = old_end + page * PMM_PAGE_SIZE;
         if (physical == PMM_INVALID_ADDRESS ||
-            !vmm_map_page(virtual, physical, VMM_WRITABLE)) {
+            !vmm_map_page(virtual, physical, VMM_WRITABLE | VMM_NO_EXECUTE)) {
             if (physical != PMM_INVALID_ADDRESS)
                 pmm_free_page(physical);
             while (mapped_pages > 0) {

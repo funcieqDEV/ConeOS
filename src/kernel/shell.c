@@ -1,7 +1,9 @@
 #include "shell.h"
 #include "../drivers/pit.h"
 #include "../drivers/ps2.h"
+#include "../drivers/rtc.h"
 #include "../drivers/serial.h"
+#include "../fs/ramfs.h"
 #include "../gfx/console.h"
 #include "../mm/kmalloc.h"
 #include "../mm/pmm.h"
@@ -47,6 +49,11 @@ static void shell_write_two_digits(uint64_t value) {
     shell_write(buffer);
 }
 
+static void shell_write_four_digits(uint64_t value) {
+    shell_write_two_digits(value / 100);
+    shell_write_two_digits(value % 100);
+}
+
 static int strings_equal(const char *left, const char *right) {
     while (*left && *left == *right) {
         left++;
@@ -63,6 +70,10 @@ static const char *task_state_name(enum task_state state) {
         return "ready";
     case TASK_RUNNING:
         return "running";
+    case TASK_BLOCKED:
+        return "blocked";
+    case TASK_SLEEPING:
+        return "sleeping";
     case TASK_ZOMBIE:
         return "zombie";
     }
@@ -107,6 +118,10 @@ static void execute_command(void) {
                     "  help\n"
                     "  clear\n"
                     "  uptime\n"
+                    "  date\n"
+                    "  ls\n"
+                    "  cat <file>\n"
+                    "  write <file> <text>\n"
                     "  meminfo\n"
                     "  pmmtest\n"
                     "  vmmtest\n"
@@ -128,6 +143,63 @@ static void execute_command(void) {
         shell_write(".");
         shell_write_two_digits(milliseconds % 1000 / 10);
         shell_write(" seconds\n");
+    } else if (strings_equal(line, "date")) {
+        struct rtc_time time;
+        if (!rtc_read(&time)) {
+            shell_write("Failed to read RTC\n");
+        } else {
+            shell_write_four_digits(time.year);
+            shell_write("-");
+            shell_write_two_digits(time.month);
+            shell_write("-");
+            shell_write_two_digits(time.day);
+            shell_write(" ");
+            shell_write_two_digits(time.hour);
+            shell_write(":");
+            shell_write_two_digits(time.minute);
+            shell_write(":");
+            shell_write_two_digits(time.second);
+            shell_write(" UTC\n");
+        }
+    } else if (strings_equal(line, "ls")) {
+        struct ramfs_file_info files[RAMFS_MAX_FILES];
+        size_t count = ramfs_list(files, RAMFS_MAX_FILES);
+        for (size_t i = 0; i < count; i++) {
+            shell_write(files[i].name);
+            shell_write(" ");
+            shell_write_uint(files[i].size);
+            shell_write(" bytes\n");
+        }
+    } else if (line_length > 4 && line[0] == 'c' && line[1] == 'a' &&
+               line[2] == 't' && line[3] == ' ') {
+        char buffer[RAMFS_DATA_SIZE];
+        size_t size;
+        if (!ramfs_read(&line[4], buffer, sizeof(buffer), &size)) {
+            shell_write("cat: file not found\n");
+        } else {
+            for (size_t i = 0; i < size; i++)
+                console_putchar(buffer[i]);
+            console_putchar('\n');
+        }
+    } else if (line_length > 6 && line[0] == 'w' && line[1] == 'r' &&
+               line[2] == 'i' && line[3] == 't' && line[4] == 'e' &&
+               line[5] == ' ') {
+        char *separator = &line[6];
+        while (*separator && *separator != ' ')
+            separator++;
+        if (!*separator) {
+            shell_write("write: invalid file or data\n");
+        } else {
+            *separator = '\0';
+            int written = ramfs_write(&line[6], separator + 1,
+                                       line_length -
+                                           (size_t)(separator + 1 - line));
+            *separator = ' ';
+            if (!written)
+                shell_write("write: invalid file or data\n");
+            else
+                shell_write("written\n");
+        }
     } else if (strings_equal(line, "meminfo")) {
         uint64_t total = pmm_total_pages();
         uint64_t free = pmm_free_pages();
@@ -157,7 +229,8 @@ static void execute_command(void) {
         uint64_t free_before = pmm_free_pages();
         uint64_t physical = pmm_alloc_page();
         int mapped = physical != PMM_INVALID_ADDRESS &&
-                     vmm_map_page(VMM_TEST_ADDRESS, physical, VMM_WRITABLE);
+                     vmm_map_page(VMM_TEST_ADDRESS, physical,
+                                   VMM_WRITABLE | VMM_NO_EXECUTE);
         int contents_valid = 0;
         if (mapped) {
             volatile uint64_t *test = (volatile uint64_t *)VMM_TEST_ADDRESS;

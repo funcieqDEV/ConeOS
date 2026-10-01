@@ -1,0 +1,52 @@
+#pragma once
+
+#define SYSCALL_WRITE 1
+#define SYSCALL_EXIT 2
+#define SYSCALL_GETPID 3
+#define SYSCALL_YIELD 4
+#define SYSCALL_UPTIME 5
+#define SYSCALL_READ 6
+#define SYSCALL_SLEEP 7
+#define SYSCALL_GETTIME 8
+#define SYSCALL_WAITPID 9
+#define SYSCALL_OPEN 10
+#define SYSCALL_CLOSE 11
+#define SYSCALL_READ_FD 12
+#define SYSCALL_WRITE_FD 13
+#define SYSCALL_EXEC 14
+#define SYSCALL_LIST 15
+#define SYSCALL_SPAWN 16
+#define SYSCALL_SEEK 17
+#define SYSCALL_STAT 18
+#define SYSCALL_GETCWD 19
+#define SYSCALL_CHDIR 20
+#define SYSCALL_MKDIR 21
+#define SYSCALL_UNLINK 22
+#define SYSCALL_PCI_LIST 23
+#define SYSCALL_RMDIR 24
+#define SYSCALL_SYNC 25
+#define SYSCALL_READDIR 26
+#define SYSCALL_MOUNT 27
+#define SYSCALL_UMOUNT 28
+#define SYSCALL_MOUNT_INFO 29
+#define SYSCALL_BRK 30
+#define SYSCALL_PIPE 31
+#define SYSCALL_DUP 32
+#define SYSCALL_DUP2 33
+#define SYSCALL_MMAP 34
+#define SYSCALL_MUNMAP 35
+#define SYSCALL_FORK 36
+
+/* mmap currently accepts private anonymous mappings only. */
+#define CONEOS_PROT_READ 0x1
+#define CONEOS_PROT_WRITE 0x2
+#define CONEOS_PROT_EXEC 0x4
+
+#define CONEOS_MAP_PRIVATE 0x1
+#define CONEOS_MAP_ANONYMOUS 0x2
+
+#define SYSCALL_EPERM (-1L)
+#define SYSCALL_EFAULT (-14L)
+#define SYSCALL_ENOMEM (-12L)
+#define SYSCALL_EINVAL (-22L)
+#define SYSCALL_ENOSYS (-38L)
