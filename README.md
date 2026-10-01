@@ -13,11 +13,13 @@ sudo dnf install gcc binutils make git xorriso qemu-system-x86-core
 Then run:
 
 ```sh
+git submodule update --init
 make run
 ```
 
-The first build downloads the binary release branch of Limine 9.x. Use `make`
-to only build `ConeOS.iso`, or `make clean` to remove generated build files.
+Flanterm is included as a Git submodule. The first build downloads the binary
+release branch of Limine 9.x. Use `make` to only build `ConeOS.iso`, or
+`make clean` to remove generated build files.
 
 ## Isolation tests
 
