@@ -1,6 +1,6 @@
 # ConeOS
 
-A hobby x86-64 operating system kernel using the Limine 9.x bootloader.
+An AI-slop x86_64 operating system using the Limine 9.x bootloader.
 
 ## Build and run
 
