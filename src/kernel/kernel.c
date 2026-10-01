@@ -3,6 +3,7 @@
 #include "../cpu/gdt.h"
 #include "../cpu/idt.h"
 #include "../cpu/irq.h"
+#include "../cpu/smp.h"
 #include "../cpu/syscall.h"
 #include "../drivers/block.h"
 #include "../drivers/framebuffer.h"
@@ -47,6 +48,11 @@ void kmain(void) {
         for (;;)
             __asm__ volatile("hlt");
     }
+    if (!smp_init()) {
+        LOG_ERROR("failed to start all CPUs before protecting boot mappings");
+        for (;;)
+            __asm__ volatile("hlt");
+    }
     if (!vmm_init()) {
         LOG_ERROR("failed to initialize virtual memory manager");
         for (;;)
@@ -72,6 +78,11 @@ void kmain(void) {
     irq_init();
     syscall_init();
     load_idt();
+    if (!smp_prepare_aps()) {
+        LOG_ERROR("failed to initialize secondary CPU contexts");
+        for (;;)
+            __asm__ volatile("hlt");
+    }
     acpi_init();
     if (!irq_controller_init()) {
         for (;;)
@@ -96,6 +107,7 @@ void kmain(void) {
     irq_clear_mask(1);
     task_enable_preemption();
     asm volatile("sti");
+    smp_start_timers();
     int userspace_active = process_run_hello();
     if (!userspace_active)
         shell_init();

@@ -19,7 +19,9 @@ make run
 
 Flanterm is included as a Git submodule. The first build downloads the binary
 release branch of Limine 9.x. Use `make` to only build `ConeOS.iso`, or
-`make clean` to remove generated build files.
+`make clean` to remove generated build files. `make run` starts QEMU with two
+vCPUs by default; use `make run QEMU_CPUS=4` to boot with four. The SMP boot
+messages appear on the serial console.
 
 ## Isolation tests
 
@@ -60,8 +62,9 @@ firmware images. Firmware variables are copied to a temporary file for testing.
 ACPI support currently covers RSDP, RSDT/XSDT and MADT discovery. APIC uses
 xAPIC MMIO and routes ISA interrupts to the boot CPU, including MADT overrides
 and NMI configuration. The scheduler still runs on that CPU, and PIT supplies
-the system clock; starting other cores, x2APIC mode, APIC timers and PCI interrupt
-routing through ACPI AML remain future work. The parser supports up to 64 CPU
+the system clock. Secondary CPUs run periodic local APIC timers with separate
+tick counters; scheduling on those CPUs, x2APIC mode and PCI interrupt routing
+through ACPI AML remain future work. The parser supports up to 64 CPU
 records, eight IOAPICs and one MiB per ACPI table; unsupported or invalid
 topologies use PIC when available. A valid MADT reporting no legacy PIC causes
 boot to stop with a diagnostic if APIC cannot be initialized.
@@ -84,3 +87,8 @@ boot to stop with a diagnostic if APIC cannot be initialized.
 - supervisor write protection, with SMEP and SMAP enabled when supported
 - ACPI MADT CPU and interrupt-controller discovery
 - Local APIC and IOAPIC routing for PIT and PS/2, with a legacy PIC fallback
+- Secondary CPUs started through Limine SMP with CPU data sized from the boot
+  response and separate guarded kernel stacks, GDT/TSS and loaded IDT; they
+  handle local APIC timer interrupts while task scheduling stays on the boot CPU
+- IRQ-saving spinlocks protect physical pages, the kernel heap, virtual memory
+  tables and kernel stack allocation across CPUs

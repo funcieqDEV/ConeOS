@@ -1,5 +1,6 @@
 #include "gdt.h"
 #include "../log.h"
+#include "../mm/kmalloc.h"
 #include "../mm/stack.h"
 #include <stddef.h>
 
@@ -20,10 +21,14 @@ struct gdt_pointer {
     uint64_t base;
 } __attribute__((packed));
 
-static uint64_t gdt[7];
-static struct tss tss;
-static struct kernel_stack double_fault_stack;
-static struct kernel_stack page_fault_stack;
+struct gdt_context {
+    uint64_t gdt[7];
+    struct tss tss;
+    struct kernel_stack double_fault_stack;
+    struct kernel_stack page_fault_stack;
+};
+
+static struct gdt_context bsp_context;
 
 extern void gdt_load(const struct gdt_pointer *pointer);
 
@@ -47,52 +52,81 @@ __asm__(".global gdt_load\n"
         "    retq\n"
         ".size gdt_load, .-gdt_load\n");
 
-static void set_tss_descriptor(void) {
-    uint64_t base = (uint64_t)&tss;
-    uint64_t limit = sizeof(tss) - 1;
+static void set_tss_descriptor(struct gdt_context *context) {
+    uint64_t base = (uint64_t)&context->tss;
+    uint64_t limit = sizeof(context->tss) - 1;
 
-    gdt[5] = (limit & 0xFFFF) | ((base & 0xFFFFFF) << 16) | (0x89ULL << 40) |
-             (((limit >> 16) & 0xF) << 48) | (((base >> 24) & 0xFF) << 56);
-    gdt[6] = base >> 32;
+    context->gdt[5] =
+        (limit & 0xFFFF) | ((base & 0xFFFFFF) << 16) | (0x89ULL << 40) |
+        (((limit >> 16) & 0xF) << 48) | (((base >> 24) & 0xFF) << 56);
+    context->gdt[6] = base >> 32;
 }
 
-int gdt_init(void) {
-    if (!kernel_stack_alloc(&double_fault_stack, IST_STACK_PAGES))
+static int gdt_context_init(struct gdt_context *context, uint64_t stack_top) {
+    if (!kernel_stack_alloc(&context->double_fault_stack, IST_STACK_PAGES))
         return 0;
-    if (!kernel_stack_alloc(&page_fault_stack, IST_STACK_PAGES)) {
-        kernel_stack_free(&double_fault_stack);
+    if (!kernel_stack_alloc(&context->page_fault_stack, IST_STACK_PAGES)) {
+        kernel_stack_free(&context->double_fault_stack);
         return 0;
     }
 
-    for (size_t i = 0; i < sizeof(tss); i++)
-        ((uint8_t *)&tss)[i] = 0;
+    for (size_t i = 0; i < sizeof(context->tss); i++)
+        ((uint8_t *)&context->tss)[i] = 0;
 
-    uint64_t current_stack;
-    __asm__ volatile("mov %%rsp, %0" : "=r"(current_stack));
-    tss.rsp[0] = current_stack;
-    tss.ist[GDT_IST_DOUBLE_FAULT - 1] = double_fault_stack.top;
-    tss.ist[GDT_IST_PAGE_FAULT - 1] = page_fault_stack.top;
-    tss.io_map_base = sizeof(tss);
+    context->tss.rsp[0] = stack_top;
+    context->tss.ist[GDT_IST_DOUBLE_FAULT - 1] =
+        context->double_fault_stack.top;
+    context->tss.ist[GDT_IST_PAGE_FAULT - 1] =
+        context->page_fault_stack.top;
+    context->tss.io_map_base = sizeof(context->tss);
 
-    gdt[0] = 0;
-    gdt[1] = 0x00AF9A000000FFFFULL;
-    gdt[2] = 0x00CF92000000FFFFULL;
-    gdt[3] = 0x00CFF2000000FFFFULL;
-    gdt[4] = 0x00AFFA000000FFFFULL;
-    set_tss_descriptor();
+    context->gdt[0] = 0;
+    context->gdt[1] = 0x00AF9A000000FFFFULL;
+    context->gdt[2] = 0x00CF92000000FFFFULL;
+    context->gdt[3] = 0x00CFF2000000FFFFULL;
+    context->gdt[4] = 0x00AFFA000000FFFFULL;
+    set_tss_descriptor(context);
+    return 1;
+}
 
+static void gdt_load_context(struct gdt_context *context) {
     struct gdt_pointer pointer = {
-        .limit = sizeof(gdt) - 1,
-        .base = (uint64_t)gdt,
+        .limit = sizeof(context->gdt) - 1,
+        .base = (uint64_t)context->gdt,
     };
     gdt_load(&pointer);
+}
+
+int gdt_init(void) {
+    uint64_t current_stack;
+    __asm__ volatile("mov %%rsp, %0" : "=r"(current_stack));
+    if (!gdt_context_init(&bsp_context, current_stack))
+        return 0;
+    gdt_load_context(&bsp_context);
     LOG_INFO("GDT and TSS initialized");
     return 1;
 }
 
-void gdt_set_kernel_stack(uint64_t stack_top) { tss.rsp[0] = stack_top; }
+struct gdt_context *gdt_prepare_secondary(uint64_t stack_top) {
+    struct gdt_context *context = kmalloc(sizeof(*context));
+    if (context == NULL)
+        return NULL;
+    if (!gdt_context_init(context, stack_top)) {
+        kfree(context);
+        return NULL;
+    }
+    return context;
+}
 
-void gdt_set_page_fault_stack(uint64_t stack_top) {
-    tss.ist[GDT_IST_PAGE_FAULT - 1] =
-        stack_top ? stack_top : page_fault_stack.top;
+void gdt_load_secondary(struct gdt_context *context) {
+    gdt_load_context(context);
+}
+
+void gdt_set_boot_cpu_kernel_stack(uint64_t stack_top) {
+    bsp_context.tss.rsp[0] = stack_top;
+}
+
+void gdt_set_boot_cpu_page_fault_stack(uint64_t stack_top) {
+    bsp_context.tss.ist[GDT_IST_PAGE_FAULT - 1] =
+        stack_top ? stack_top : bsp_context.page_fault_stack.top;
 }

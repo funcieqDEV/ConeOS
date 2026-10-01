@@ -149,14 +149,22 @@ kończy wyłącznie ten proces, nie cały system.
 
 ## 10. Wielordzeniowość, synchronizacja i stabilizacja
 
-- Uruchomić dodatkowe rdzenie przez Limine SMP.
+- [~] Uruchomić dodatkowe rdzenie przez Limine SMP — liczba rekordów CPU wynika
+  z odpowiedzi Limine; każdy rdzeń pomocniczy ma własny stos kernela z guard
+  page, GDT/TSS i załadowane IDT. Rdzenie obsługują własny timer APIC, ale nie
+  wykonują jeszcze zadań schedulera.
 - [x] Odczytać ACPI RSDP, RSDT/XSDT i MADT, wykrywać CPU oraz kontrolery
   przerwań i walidować tablice firmware.
 - [~] Dodać Local APIC, IOAPIC i timery per CPU — xAPIC obsługuje przerwania ISA
-  na rdzeniu startowym, nadpisania tras IRQ oraz wpisy NMI. PIT nadal dostarcza
-  zegar; timery APIC per CPU i tryb x2APIC pozostają do dodania. PIC jest
+  na rdzeniu startowym, nadpisania tras IRQ oraz wpisy NMI. Timery lokalnego
+  APIC odliczają osobno na każdym CPU; PIT nadal dostarcza zegar systemowy.
+  Tryb x2APIC pozostaje do dodania. PIC jest
   używany przy braku ACPI/APIC lub nieobsługiwanej konfiguracji.
-- Zaimplementować spinlocki, mutexy, wait queues i dane per CPU.
+- [~] Zaimplementować spinlocki, mutexy, wait queues i dane per CPU —
+  `spin_lock_irqsave` chroni PMM, stertę kernela, VMM i przydział stosów.
+  Kolejność blokad: sterta/stosy → VMM → PMM. Mutexy, wait queues i pozostałe
+  współdzielone struktury wymagają dalszej synchronizacji przed uruchomieniem
+  schedulera na dodatkowych CPU.
 - Rozszerzyć scheduler o kolejki per CPU i migrację zadań.
 - [~] Dodać automatyczne testy bootowania w QEMU, testy regresji syscalli,
   filesystemu i pamięci oraz tryb diagnostyczny kernela — `make test-acpi`,

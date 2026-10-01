@@ -3,8 +3,9 @@ LD = ld
 LIMINE_DIR = limine
 LIMINE_REPO = https://github.com/limine-bootloader/limine.git
 LIMINE_BRANCH = v9.x-binary
+QEMU_CPUS ?= 2
 
-CFLAGS = -Wall -Wextra -O2 -pipe -m64 -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -Iflanterm/src -MMD -MP
+CFLAGS = -Wall -Wextra -O2 -pipe -m64 -ffreestanding -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -Iflanterm/src -MMD -MP
 USER_CFLAGS = -Wall -Wextra -O2 -m64 -ffreestanding -fno-stack-protector \
 	-fno-pie -mno-80387 -mno-mmx -mno-sse -mno-sse2 -mno-red-zone
 LDFLAGS = -m elf_x86_64 -nostdlib -static -T linker.ld -z max-page-size=0x1000
@@ -37,6 +38,7 @@ OBJS = build/kernel/kernel.o \
        build/cpu/gdt.o \
        build/cpu/protection.o \
        build/cpu/apic.o \
+       build/cpu/smp.o \
        build/firmware/acpi.o \
        build/firmware/madt.o \
        build/cpu/idt.o \
@@ -171,7 +173,7 @@ disk.img:
 	mkfs.fat -F 32 -n CONEOS $@
 
 run: check-run-tools iso disk.img
-	qemu-system-x86_64 -M q35 -m 256M -cdrom ConeOS.iso -boot d -serial stdio\
+	qemu-system-x86_64 -M q35 -smp $(QEMU_CPUS) -m 256M -cdrom ConeOS.iso -boot d -serial stdio\
 		-drive file=disk.img,if=none,id=coneos_disk,format=raw \
 		-device virtio-blk-pci,drive=coneos_disk,disable-modern=on
 

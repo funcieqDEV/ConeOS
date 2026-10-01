@@ -12,5 +12,8 @@
 #define GDT_IST_PAGE_FAULT 2
 
 int gdt_init(void);
-void gdt_set_kernel_stack(uint64_t stack_top);
-void gdt_set_page_fault_stack(uint64_t stack_top);
+struct gdt_context;
+struct gdt_context *gdt_prepare_secondary(uint64_t stack_top);
+void gdt_load_secondary(struct gdt_context *context);
+void gdt_set_boot_cpu_kernel_stack(uint64_t stack_top);
+void gdt_set_boot_cpu_page_fault_stack(uint64_t stack_top);

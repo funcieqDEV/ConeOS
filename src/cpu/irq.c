@@ -2,6 +2,7 @@
 #include "../drivers/pic.h"
 #include "../firmware/acpi.h"
 #include "../log.h"
+#include "smp.h"
 #include "apic.h"
 #include "gdt.h"
 #include "idt.h"
@@ -52,6 +53,14 @@ apic_spurious_stub(struct interrupt_frame *frame) {
     /* A LAPIC spurious vector has no in-service bit and needs no EOI. */
 }
 
+__attribute__((interrupt)) static void
+apic_timer_stub(struct interrupt_frame *frame) {
+    (void)frame;
+    cpu_clear_access_override();
+    smp_timer_tick_current();
+    apic_eoi();
+}
+
 #define IRQ_STUB(n)                                                            \
     __attribute__((interrupt)) static void irq##n##_stub(                      \
         struct interrupt_frame *frame) {                                       \
@@ -90,6 +99,8 @@ void irq_init(void) {
 
     idt_set_gate(0xFF, (uint64_t)apic_spurious_stub, GDT_KERNEL_CODE,
                  IDT_INT_GATE, 0);
+    idt_set_gate(APIC_TIMER_VECTOR, (uint64_t)apic_timer_stub,
+                 GDT_KERNEL_CODE, IDT_INT_GATE, 0);
     LOG_INFO("IRQ initialized");
 }
 
@@ -108,3 +119,5 @@ int irq_controller_init(void) {
     LOG_INFO(use_apic ? "IRQ controller: APIC" : "IRQ controller: PIC");
     return 1;
 }
+
+int irq_uses_apic(void) { return use_apic; }

@@ -1,4 +1,5 @@
 #include "kmalloc.h"
+#include "../cpu/spinlock.h"
 #include "../log.h"
 #include "pmm.h"
 #include "vmm.h"
@@ -26,16 +27,7 @@ _Static_assert(sizeof(block_header_t) % ALIGNMENT == 0,
 static block_header_t *first_block;
 static uint64_t mapped_size;
 static size_t active_allocations;
-
-static uint64_t interrupt_lock(void) {
-    uint64_t flags;
-    __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) : : "memory");
-    return flags;
-}
-
-static void interrupt_restore(uint64_t flags) {
-    __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
-}
+static spinlock_t heap_lock = SPINLOCK_INITIALIZER;
 
 static size_t align_up(size_t value, size_t alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
@@ -155,7 +147,7 @@ void *kmalloc(size_t size) {
         return NULL;
 
     size = align_up(size, ALIGNMENT);
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
 
     for (;;) {
         for (block_header_t *block = first_block; block != NULL;
@@ -165,13 +157,13 @@ void *kmalloc(size_t size) {
                 split_block(block, size);
                 block->state = BLOCK_USED;
                 active_allocations++;
-                interrupt_restore(flags);
+                spin_unlock_irqrestore(&heap_lock, flags);
                 return block + 1;
             }
         }
 
         if (!grow_heap(size)) {
-            interrupt_restore(flags);
+            spin_unlock_irqrestore(&heap_lock, flags);
             return NULL;
         }
     }
@@ -181,15 +173,17 @@ int kfree(void *pointer) {
     if (pointer == NULL)
         return 0;
 
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     uint64_t address = (uint64_t)pointer;
     if (address < HEAP_BASE + sizeof(block_header_t) ||
-        address >= HEAP_BASE + mapped_size || address % ALIGNMENT != 0)
+        address >= HEAP_BASE + mapped_size || address % ALIGNMENT != 0) {
+        spin_unlock_irqrestore(&heap_lock, flags);
         return 0;
+    }
 
-    uint64_t flags = interrupt_lock();
     block_header_t *block = find_block_for_pointer(pointer);
     if (block == NULL || block->state != BLOCK_USED) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&heap_lock, flags);
         return 0;
     }
 
@@ -201,7 +195,7 @@ int kfree(void *pointer) {
         merge_with_next(block);
     }
 
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&heap_lock, flags);
     return 1;
 }
 
@@ -209,7 +203,7 @@ void kmalloc_get_stats(struct kmalloc_stats *stats) {
     if (stats == NULL)
         return;
 
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     stats->mapped_bytes = mapped_size;
     stats->used_bytes = 0;
     stats->free_bytes = 0;
@@ -222,5 +216,5 @@ void kmalloc_get_stats(struct kmalloc_stats *stats) {
         else
             stats->free_bytes += block->size;
     }
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&heap_lock, flags);
 }

@@ -2,7 +2,6 @@
 #include "../log.h"
 
 static struct idt_entry idt[256];
-static struct idt_ptr idtp;
 
 void idt_set_gate(uint8_t vector, uint64_t handler, uint16_t selector,
                   uint8_t type_attr, uint8_t ist) {
@@ -16,10 +15,15 @@ void idt_set_gate(uint8_t vector, uint64_t handler, uint16_t selector,
     e->zero = 0;
 }
 
-void load_idt(void) {
-    idtp.base = (uint64_t)&idt;
-    idtp.limit = sizeof(idt) - 1;
+void idt_load_current(void) {
+    struct idt_ptr pointer = {
+        .base = (uint64_t)&idt,
+        .limit = sizeof(idt) - 1,
+    };
+    __asm__ volatile("lidt %0" : : "m"(pointer));
+}
 
-    __asm__ volatile("lidt %0" : : "m"(idtp));
+void load_idt(void) {
+    idt_load_current();
     LOG_INFO("IDT loaded");
 }

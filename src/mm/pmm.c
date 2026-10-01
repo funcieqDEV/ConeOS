@@ -1,5 +1,6 @@
 #include "pmm.h"
 #include "../../limine/limine.h"
+#include "../cpu/spinlock.h"
 #include "../log.h"
 #include <stddef.h>
 
@@ -25,6 +26,7 @@ static uint64_t free_pages;
 static uint64_t search_start;
 static uint64_t hhdm_offset;
 static struct limine_memmap_response *memory_map;
+static spinlock_t pmm_lock = SPINLOCK_INITIALIZER;
 
 #define PMM_KERNEL_RESERVE_PAGES (4ULL * 1024 * 1024 / PMM_PAGE_SIZE)
 
@@ -44,16 +46,6 @@ static void bitmap_set(uint64_t page) { bitmap[page / 8] |= 1u << (page % 8); }
 
 static void bitmap_clear(uint64_t page) {
     bitmap[page / 8] &= ~(1u << (page % 8));
-}
-
-static uint64_t interrupt_lock(void) {
-    uint64_t flags;
-    __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) : : "memory");
-    return flags;
-}
-
-static void interrupt_restore(uint64_t flags) {
-    __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
 }
 
 static int page_is_usable(uint64_t physical_address) {
@@ -149,9 +141,9 @@ int pmm_init(void) {
 }
 
 static uint64_t alloc_page_with_reserve(uint64_t reserve_pages) {
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     if (free_pages <= reserve_pages) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&pmm_lock, flags);
         return PMM_INVALID_ADDRESS;
     }
 
@@ -167,12 +159,12 @@ static uint64_t alloc_page_with_reserve(uint64_t reserve_pages) {
             page_references[page] = 1;
             free_pages--;
             search_start = page + 1;
-            interrupt_restore(flags);
+            spin_unlock_irqrestore(&pmm_lock, flags);
             return page * PMM_PAGE_SIZE;
         }
     }
 
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return PMM_INVALID_ADDRESS;
 }
 
@@ -185,9 +177,9 @@ uint64_t pmm_alloc_user_page(void) {
 uint64_t pmm_alloc_contiguous(uint64_t count) {
     if (count == 0)
         return PMM_INVALID_ADDRESS;
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     if (count > free_pages) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&pmm_lock, flags);
         return PMM_INVALID_ADDRESS;
     }
     for (uint64_t pass = 0; pass < 2; pass++) {
@@ -207,11 +199,11 @@ uint64_t pmm_alloc_contiguous(uint64_t count) {
             }
             free_pages -= count;
             search_start = page + count;
-            interrupt_restore(flags);
+            spin_unlock_irqrestore(&pmm_lock, flags);
             return page * PMM_PAGE_SIZE;
         }
     }
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return PMM_INVALID_ADDRESS;
 }
 
@@ -227,15 +219,15 @@ int pmm_free_page(uint64_t physical_address) {
         return 0;
 
     uint64_t page = physical_address / PMM_PAGE_SIZE;
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     if (!bitmap_test(page)) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&pmm_lock, flags);
         return 0;
     }
 
     if (page_references[page] > 1) {
         page_references[page]--;
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&pmm_lock, flags);
         return 1;
     }
 
@@ -244,7 +236,7 @@ int pmm_free_page(uint64_t physical_address) {
     free_pages++;
     if (page < search_start)
         search_start = page;
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return 1;
 }
 
@@ -255,14 +247,14 @@ int pmm_retain_page(uint64_t physical_address) {
         return 0;
 
     uint64_t page = physical_address / PMM_PAGE_SIZE;
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     if (!bitmap_test(page) || page_references[page] == 0 ||
         page_references[page] == UINT16_MAX) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&pmm_lock, flags);
         return 0;
     }
     page_references[page]++;
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return 1;
 }
 
@@ -273,9 +265,9 @@ uint16_t pmm_page_references(uint64_t physical_address) {
         return 0;
 
     uint64_t page = physical_address / PMM_PAGE_SIZE;
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     uint16_t references = bitmap_test(page) ? page_references[page] : 0;
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return references;
 }
 
@@ -286,8 +278,8 @@ void *pmm_physical_to_virtual(uint64_t physical_address) {
 uint64_t pmm_total_pages(void) { return total_pages; }
 
 uint64_t pmm_free_pages(void) {
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     uint64_t result = free_pages;
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return result;
 }

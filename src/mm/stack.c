@@ -1,26 +1,18 @@
 #include "stack.h"
+#include "../cpu/spinlock.h"
 #include "pmm.h"
 #include "vmm.h"
 
 #define STACK_REGION_BASE 0xFFFFE00000000000ULL
 
 static uint64_t next_stack_base = STACK_REGION_BASE;
-
-static uint64_t interrupt_lock(void) {
-    uint64_t flags;
-    __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) : : "memory");
-    return flags;
-}
-
-static void interrupt_restore(uint64_t flags) {
-    __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
-}
+static spinlock_t stack_lock = SPINLOCK_INITIALIZER;
 
 int kernel_stack_alloc(struct kernel_stack *stack, size_t page_count) {
     if (stack == NULL || page_count == 0)
         return 0;
 
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&stack_lock);
     uint64_t guard_base = next_stack_base;
     uint64_t bottom = guard_base + PMM_PAGE_SIZE;
     size_t mapped_pages = 0;
@@ -40,7 +32,7 @@ int kernel_stack_alloc(struct kernel_stack *stack, size_t page_count) {
                 if (rollback_physical != PMM_INVALID_ADDRESS)
                     pmm_free_page(rollback_physical);
             }
-            interrupt_restore(flags);
+            spin_unlock_irqrestore(&stack_lock, flags);
             return 0;
         }
         mapped_pages++;
@@ -51,7 +43,7 @@ int kernel_stack_alloc(struct kernel_stack *stack, size_t page_count) {
     stack->top = bottom + page_count * PMM_PAGE_SIZE;
     stack->page_count = page_count;
     next_stack_base = stack->top;
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&stack_lock, flags);
     return 1;
 }
 
@@ -59,7 +51,7 @@ void kernel_stack_free(struct kernel_stack *stack) {
     if (stack == NULL || stack->page_count == 0)
         return;
 
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&stack_lock);
     for (size_t page = 0; page < stack->page_count; page++) {
         uint64_t virtual = stack->bottom + page * PMM_PAGE_SIZE;
         uint64_t physical = vmm_unmap_page(virtual);
@@ -71,7 +63,7 @@ void kernel_stack_free(struct kernel_stack *stack) {
     stack->bottom = 0;
     stack->top = 0;
     stack->page_count = 0;
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&stack_lock, flags);
 }
 
 int kernel_stack_contains_guard(const struct kernel_stack *stack,

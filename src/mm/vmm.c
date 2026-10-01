@@ -1,6 +1,7 @@
 #include "vmm.h"
 #include "../../limine/limine.h"
 #include "../cpu/protection.h"
+#include "../cpu/spinlock.h"
 #include "../log.h"
 #include "kmalloc.h"
 #include "pmm.h"
@@ -12,6 +13,10 @@
 #define ENTRY_COUNT 512
 
 static struct vmm_space kernel_space;
+static spinlock_t vmm_lock = SPINLOCK_INITIALIZER;
+
+static int map_page_locked(struct vmm_space *space, uint64_t virtual_address,
+                           uint64_t physical_address, uint64_t flags);
 
 __attribute__((used, section(".limine_requests"))) static volatile struct
     limine_kernel_address_request kernel_address_request = {
@@ -25,16 +30,6 @@ extern char __kernel_rodata_start[], __kernel_rodata_end[];
 static int address_is_canonical(uint64_t address) {
     uint64_t upper = address >> 48;
     return upper == ((address & (1ULL << 47)) ? 0xFFFF : 0);
-}
-
-static uint64_t interrupt_lock(void) {
-    uint64_t flags;
-    __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) : : "memory");
-    return flags;
-}
-
-static void interrupt_restore(uint64_t flags) {
-    __asm__ volatile("push %0; popfq" : : "r"(flags) : "memory", "cc");
 }
 
 static uint64_t table_physical(uint64_t entry) {
@@ -152,7 +147,7 @@ static int clone_user_mappings_cow(struct vmm_space *child,
         uint64_t physical = table_physical(entry);
         if (!pmm_retain_page(physical))
             return 0;
-        if (!vmm_space_map_page(child, address, physical, flags)) {
+        if (!map_page_locked(child, address, physical, flags)) {
             pmm_free_page(physical);
             return 0;
         }
@@ -196,14 +191,14 @@ struct vmm_space *vmm_space_clone_cow(struct vmm_space *space) {
     if (child == NULL)
         return NULL;
 
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&vmm_lock);
     if (!clone_user_mappings_cow(child, space->pml4_physical, 4, 0)) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&vmm_lock, flags);
         vmm_space_destroy(child);
         return NULL;
     }
     protect_user_mappings_cow(space, space->pml4_physical, 4, 0);
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&vmm_lock, flags);
     return child;
 }
 
@@ -351,8 +346,9 @@ struct vmm_space *vmm_space_create(void) {
     }
 
     uint64_t *root = pmm_physical_to_virtual(physical);
-    uint64_t *kernel_root = space_root(&kernel_space);
     clear_table(root);
+    uint64_t lock_flags = spin_lock_irqsave(&vmm_lock);
+    uint64_t *kernel_root = space_root(&kernel_space);
     for (size_t i = 0; i < ENTRY_COUNT / 2; i++) {
         uint64_t entry = kernel_root[i];
         if (!(entry & VMM_PRESENT))
@@ -365,6 +361,7 @@ struct vmm_space *vmm_space_create(void) {
                     destroy_cloned_tables(table_physical(root[j]), 3);
             }
             pmm_free_page(physical);
+            spin_unlock_irqrestore(&vmm_lock, lock_flags);
             kfree(space);
             return NULL;
         }
@@ -374,6 +371,7 @@ struct vmm_space *vmm_space_create(void) {
         root[i] = kernel_root[i];
 
     space->pml4_physical = physical;
+    spin_unlock_irqrestore(&vmm_lock, lock_flags);
     return space;
 }
 
@@ -398,14 +396,14 @@ void vmm_space_destroy(struct vmm_space *space) {
     if (space == NULL || space == &kernel_space)
         return;
 
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&vmm_lock);
     uint64_t *root = space_root(space);
     for (size_t i = 0; i < ENTRY_COUNT / 2; i++) {
         if (root[i] & VMM_PRESENT)
             destroy_table(table_physical(root[i]), 3);
     }
     pmm_free_page(space->pml4_physical);
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&vmm_lock, flags);
     kfree(space);
 }
 
@@ -417,8 +415,8 @@ void vmm_space_activate(struct vmm_space *space) {
                          : "memory");
 }
 
-int vmm_space_map_page(struct vmm_space *space, uint64_t virtual_address,
-                       uint64_t physical_address, uint64_t flags) {
+static int map_page_locked(struct vmm_space *space, uint64_t virtual_address,
+                           uint64_t physical_address, uint64_t flags) {
     if (space == NULL || !address_is_canonical(virtual_address) ||
         virtual_address % PMM_PAGE_SIZE != 0 ||
         physical_address % PMM_PAGE_SIZE != 0 ||
@@ -436,7 +434,6 @@ int vmm_space_map_page(struct vmm_space *space, uint64_t virtual_address,
         (virtual_address >> 12) & 0x1FF,
     };
 
-    uint64_t lock_flags = interrupt_lock();
     uint64_t *table = space_root(space);
     uint64_t *created_entries[3];
     uint64_t created_pages[3];
@@ -475,7 +472,6 @@ int vmm_space_map_page(struct vmm_space *space, uint64_t virtual_address,
     __asm__ volatile("mov %%cr3, %0" : "=r"(current_cr3));
     if ((current_cr3 & PAGE_ADDRESS_MASK) == space->pml4_physical)
         __asm__ volatile("invlpg (%0)" : : "r"(virtual_address) : "memory");
-    interrupt_restore(lock_flags);
     return 1;
 
 rollback:
@@ -484,8 +480,16 @@ rollback:
         *created_entries[created_count] = 0;
         pmm_free_page(created_pages[created_count]);
     }
-    interrupt_restore(lock_flags);
     return 0;
+}
+
+int vmm_space_map_page(struct vmm_space *space, uint64_t virtual_address,
+                       uint64_t physical_address, uint64_t flags) {
+    uint64_t lock_flags = spin_lock_irqsave(&vmm_lock);
+    int result = map_page_locked(space, virtual_address, physical_address,
+                                 flags);
+    spin_unlock_irqrestore(&vmm_lock, lock_flags);
+    return result;
 }
 
 int vmm_map_page(uint64_t virtual_address, uint64_t physical_address,
@@ -508,7 +512,7 @@ uint64_t vmm_space_unmap_page(struct vmm_space *space,
         (virtual_address >> 12) & 0x1FF,
     };
 
-    uint64_t lock_flags = interrupt_lock();
+    uint64_t lock_flags = spin_lock_irqsave(&vmm_lock);
     uint64_t *root = space_root(space);
     uint64_t *tables[4] = {root};
     uint64_t *table = root;
@@ -516,7 +520,7 @@ uint64_t vmm_space_unmap_page(struct vmm_space *space,
     for (size_t level = 0; level < 3; level++) {
         uint64_t entry = table[indices[level]];
         if (!(entry & VMM_PRESENT) || (entry & PAGE_SIZE_FLAG)) {
-            interrupt_restore(lock_flags);
+            spin_unlock_irqrestore(&vmm_lock, lock_flags);
             return PMM_INVALID_ADDRESS;
         }
         table = table_virtual(entry);
@@ -525,7 +529,7 @@ uint64_t vmm_space_unmap_page(struct vmm_space *space,
 
     uint64_t *page_entry = &tables[3][indices[3]];
     if (!(*page_entry & VMM_PRESENT)) {
-        interrupt_restore(lock_flags);
+        spin_unlock_irqrestore(&vmm_lock, lock_flags);
         return PMM_INVALID_ADDRESS;
     }
 
@@ -546,7 +550,7 @@ uint64_t vmm_space_unmap_page(struct vmm_space *space,
         pmm_free_page(table_page);
     }
 
-    interrupt_restore(lock_flags);
+    spin_unlock_irqrestore(&vmm_lock, lock_flags);
     return physical_address;
 }
 
@@ -574,7 +578,7 @@ int vmm_space_query(const struct vmm_space *space, uint64_t virtual_address,
         (virtual_address >> 12) & 0x1FF,
     };
 
-    uint64_t lock_flags = interrupt_lock();
+    uint64_t lock_flags = spin_lock_irqsave(&vmm_lock);
     uint64_t *table = space_root(space);
     uint64_t effective = VMM_WRITABLE | VMM_USER;
     uint64_t no_execute = 0;
@@ -582,7 +586,7 @@ int vmm_space_query(const struct vmm_space *space, uint64_t virtual_address,
         uint64_t entry = table[indices[level]];
         if (!(entry & VMM_PRESENT) ||
             (level == 0 && (entry & PAGE_SIZE_FLAG))) {
-            interrupt_restore(lock_flags);
+            spin_unlock_irqrestore(&vmm_lock, lock_flags);
             return 0;
         }
         effective &= entry & (VMM_WRITABLE | VMM_USER);
@@ -596,12 +600,12 @@ int vmm_space_query(const struct vmm_space *space, uint64_t virtual_address,
             if (flags != NULL)
                 *flags = VMM_PRESENT | effective | no_execute |
                          (entry & VMM_COPY_ON_WRITE);
-            interrupt_restore(lock_flags);
+            spin_unlock_irqrestore(&vmm_lock, lock_flags);
             return 1;
         }
         table = table_virtual(entry);
     }
-    interrupt_restore(lock_flags);
+    spin_unlock_irqrestore(&vmm_lock, lock_flags);
     return 0;
 }
 
@@ -616,12 +620,12 @@ int vmm_space_resolve_cow(struct vmm_space *space, uint64_t virtual_address) {
         (virtual_address >> 12) & 0x1FF,
     };
 
-    uint64_t flags = interrupt_lock();
+    uint64_t flags = spin_lock_irqsave(&vmm_lock);
     uint64_t *table = space_root(space);
     for (size_t level = 0; level < 3; level++) {
         uint64_t entry = table[indices[level]];
         if (!(entry & VMM_PRESENT) || (entry & PAGE_SIZE_FLAG)) {
-            interrupt_restore(flags);
+            spin_unlock_irqrestore(&vmm_lock, flags);
             return 0;
         }
         table = table_virtual(entry);
@@ -632,14 +636,14 @@ int vmm_space_resolve_cow(struct vmm_space *space, uint64_t virtual_address) {
     if ((old_entry & (VMM_PRESENT | VMM_USER | VMM_COPY_ON_WRITE)) !=
             (VMM_PRESENT | VMM_USER | VMM_COPY_ON_WRITE) ||
         (old_entry & VMM_WRITABLE)) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&vmm_lock, flags);
         return 0;
     }
 
     uint64_t old_physical = table_physical(old_entry);
     uint16_t references = pmm_page_references(old_physical);
     if (references == 0) {
-        interrupt_restore(flags);
+        spin_unlock_irqrestore(&vmm_lock, flags);
         return 0;
     }
 
@@ -649,7 +653,7 @@ int vmm_space_resolve_cow(struct vmm_space *space, uint64_t virtual_address) {
     } else {
         uint64_t new_physical = pmm_alloc_user_page();
         if (new_physical == PMM_INVALID_ADDRESS) {
-            interrupt_restore(flags);
+            spin_unlock_irqrestore(&vmm_lock, flags);
             return -1;
         }
         uint8_t *source = pmm_physical_to_virtual(old_physical);
@@ -667,7 +671,7 @@ int vmm_space_resolve_cow(struct vmm_space *space, uint64_t virtual_address) {
     uint64_t page_address = virtual_address & ~(uint64_t)(PMM_PAGE_SIZE - 1);
     if ((current_cr3 & PAGE_ADDRESS_MASK) == space->pml4_physical)
         __asm__ volatile("invlpg (%0)" : : "r"(page_address) : "memory");
-    interrupt_restore(flags);
+    spin_unlock_irqrestore(&vmm_lock, flags);
     return 1;
 }
 

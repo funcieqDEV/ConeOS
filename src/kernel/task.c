@@ -256,8 +256,9 @@ static void schedule(int clean_zombies) {
 
     next->state = TASK_RUNNING;
     current_task = next;
-    gdt_set_kernel_stack(next->stack.top);
-    gdt_set_page_fault_stack(next == &main_task ? 0 : next->fault_stack.top);
+    gdt_set_boot_cpu_kernel_stack(next->stack.top);
+    gdt_set_boot_cpu_page_fault_stack(next == &main_task ? 0
+                                                         : next->fault_stack.top);
     vmm_space_activate(next->space);
     task_context_switch(&previous->stack_pointer, next->stack_pointer);
     interrupt_restore(flags);

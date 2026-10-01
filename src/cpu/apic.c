@@ -1,6 +1,7 @@
 #include "apic.h"
 #include "../drivers/serial.h"
 #include "../firmware/acpi.h"
+#include "../drivers/pit.h"
 #include "../log.h"
 #include "../mm/vmm.h"
 
@@ -16,9 +17,16 @@
 #define LAPIC_SVR 0xF0
 #define LAPIC_ESR 0x280
 #define LAPIC_LVT_TIMER 0x320
+#define LAPIC_TIMER_INITIAL 0x380
+#define LAPIC_TIMER_CURRENT 0x390
+#define LAPIC_TIMER_DIVIDE 0x3E0
 #define LAPIC_LVT_LINT0 0x350
 #define LAPIC_LVT_LINT1 0x360
 #define LAPIC_MASKED (1U << 16)
+#define LAPIC_TIMER_PERIODIC (1U << 17)
+#define LAPIC_TIMER_DIVIDE_16 0x3
+#define LAPIC_CALIBRATION_TICKS 10
+#define LAPIC_CALIBRATION_SPINS 100000000ULL
 #define IOAPIC_REDTBL 0x10
 #define NMI_DELIVERY (4U << 8)
 
@@ -266,6 +274,52 @@ fail:
 }
 
 void apic_eoi(void) { lapic_write(LAPIC_EOI, 0); }
+
+uint32_t apic_current_id(void) { return lapic_read(LAPIC_ID) >> 24; }
+
+static int wait_for_pit_ticks(uint64_t start, uint64_t amount) {
+    for (uint64_t spin = 0; spin < LAPIC_CALIBRATION_SPINS; spin++) {
+        if (pit_ticks() - start >= amount)
+            return 1;
+        __asm__ volatile("pause");
+    }
+    return 0;
+}
+
+int apic_timer_start(void) {
+    if (lapic == NULL)
+        return 0;
+    uint32_t low, high;
+    __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(IA32_APIC_BASE));
+    uint64_t base = ((uint64_t)high << 32) | low;
+    if (base & APIC_X2_MODE)
+        return 0;
+    if (!(base & APIC_ENABLE))
+        set_apic_base(base | APIC_ENABLE);
+
+    lapic_write(LAPIC_TPR, 0);
+    lapic_write(LAPIC_SVR, 0x100 | 0xFF);
+    lapic_write(LAPIC_LVT_TIMER, LAPIC_MASKED | APIC_TIMER_VECTOR);
+    lapic_write(LAPIC_TIMER_DIVIDE, LAPIC_TIMER_DIVIDE_16);
+    lapic_write(LAPIC_TIMER_INITIAL, 0);
+
+    if (!wait_for_pit_ticks(pit_ticks(), 1))
+        return 0;
+    uint64_t start = pit_ticks();
+    lapic_write(LAPIC_TIMER_INITIAL, UINT32_MAX);
+    if (!wait_for_pit_ticks(start, LAPIC_CALIBRATION_TICKS)) {
+        lapic_write(LAPIC_TIMER_INITIAL, 0);
+        return 0;
+    }
+    uint32_t elapsed = UINT32_MAX - lapic_read(LAPIC_TIMER_CURRENT);
+    lapic_write(LAPIC_TIMER_INITIAL, 0);
+    uint32_t period = elapsed / LAPIC_CALIBRATION_TICKS;
+    if (period < 16)
+        return 0;
+    lapic_write(LAPIC_LVT_TIMER, LAPIC_TIMER_PERIODIC | APIC_TIMER_VECTOR);
+    lapic_write(LAPIC_TIMER_INITIAL, period);
+    return 1;
+}
 
 void apic_set_irq_mask(uint8_t irq, int masked) {
     if (irq >= 16 || !routes[irq].controller)
